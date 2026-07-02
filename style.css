@@ -1,3 +1,8 @@
+/* Добавляем белый фон всем ячейкам, чтобы текст не просвечивал */
+td {
+    background-color: white;
+}
+
 .yandex-template {
     background-color: #fef08a;
     color: #854d0e;
@@ -5,12 +10,21 @@
     border-radius: 2px;
     font-weight: 500;
 }
+
 .sticky-col {
-    background-color: inherit;
+    background-color: white !important; /* Устанавливаем белый фон для липких колонок */
+    z-index: 20 !important;             /* Поднимаем их выше обычных ячеек */
 }
+
+/* Добавляем тень справа для визуального отделения при скролле */
+.sticky-col.border-r {
+    box-shadow: 2px 0 5px rgba(0,0,0,0.05);
+}
+
 tr:hover .sticky-col {
-    background-color: rgb(248, 250, 252);
+    background-color: rgb(248, 250, 252) !important;
 }
+
 .editable-cell:focus {
     outline: 2px solid #4f46e5;
     background-color: #ffffff !important;
