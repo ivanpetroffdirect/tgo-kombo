@@ -51,21 +51,40 @@ function handleFileSelect(event) {
         // 1. Разбиваем файл на строки
         const lines = text.split(/\r?\n/);
         
-        // 2. Превращаем строки в массив массивов, разбивая по табуляции (\t)
-        // Если TSV не сработал, попробуем заменить \t на запятую или разбить вручную
-        rawExcelRows = lines.map(line => line.split('\t'));
-
-        // 3. Проверка: нашли ли мы заголовок "Заголовок 1"?
-        // Ищем индекс строки, где есть заголовок
-        const headerIndex = rawExcelRows.findIndex(row => row.includes('Заголовок 1'));
-
-        if (headerIndex === -1) {
-            alert("Не удалось найти столбец 'Заголовок 1'. Проверьте формат файла (он должен быть TSV с табуляцией).");
-            console.log("Первая строка файла для отладки:", rawExcelRows[0]);
+        // 2. Определяем разделитель (ищем, какой символ чаще всего встречается в первой строке)
+        const firstLine = lines.find(l => l.includes('Заголовок 1'));
+        if (!firstLine) {
+            alert("Не удалось найти строку с заголовками. Проверьте файл.");
             return;
         }
 
-        // Если нашли, обрезаем файл до заголовков
+        // Пробуем определить: \t, ; или | (Директ иногда чудит)
+        const separators = ['\t', ';', '|', ','];
+        let separator = '\t'; // дефолт
+        let maxCols = 0;
+
+        separators.forEach(sep => {
+            const cols = firstLine.split(sep).length;
+            if (cols > maxCols) {
+                maxCols = cols;
+                separator = sep;
+            }
+        });
+
+        // 3. Парсим строки с выбранным разделителем
+        rawExcelRows = lines
+            .filter(line => line.trim() !== '') // убираем пустые строки
+            .map(line => line.split(separator).map(cell => cell.trim()));
+
+        // 4. Находим индекс заголовка
+        const headerIndex = rawExcelRows.findIndex(row => row.includes('Заголовок 1'));
+
+        if (headerIndex === -1) {
+            alert("Не удалось найти столбец 'Заголовок 1'. Попробуйте пересохранить файл в Excel как 'CSV (разделители - запятые)'");
+            return;
+        }
+
+        // Обрезаем всё, что выше заголовков
         rawExcelRows = rawExcelRows.slice(headerIndex);
 
         analyzeStructureAndProcess();
@@ -73,7 +92,7 @@ function handleFileSelect(event) {
         downloadFileBtn.className = "bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-3 px-5 rounded-xl transition-all flex items-center gap-2 shadow-md text-sm active:scale-98 cursor-pointer";
     };
 
-    reader.readAsText(file);
+    reader.readAsText(file, 'windows-1251'); // У Директа часто такая кодировка
 }
 
 function analyzeStructureAndProcess() {
