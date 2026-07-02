@@ -46,47 +46,47 @@ function handleFileSelect(event) {
     const reader = new FileReader();
 
     reader.onload = function(e) {
-        if (file.name.endsWith('.xlsx') || file.name.endsWith('.xls')) {
-            // Для Excel используем штатный парсер
+        if (file.name.match(/\.(xlsx|xls)$/)) {
             const data = new Uint8Array(e.target.result);
             const workbook = XLSX.read(data, { type: 'array' });
             const worksheet = workbook.Sheets[workbook.SheetNames[0]];
             rawExcelRows = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' });
         } else {
-            // Для CSV/TSV используем наш ручной парсер
             const text = e.target.result;
             const lines = text.split(/\r?\n/);
-            const firstLine = lines.find(l => l.includes('Заголовок 1'));
             
-            const separators = ['\t', ';', '|', ','];
-            let separator = '\t';
-            let maxCols = 0;
-            separators.forEach(sep => {
-                const cols = firstLine.split(sep).length;
-                if (cols > maxCols) { maxCols = cols; separator = sep; }
-            });
+            // Находим строку, которая содержит ключевые поля
+            const headerRowIndex = lines.findIndex(l => l.includes('Заголовок 1'));
+            
+            if (headerRowIndex === -1) {
+                alert("Ошибка: Не могу найти 'Заголовок 1'.");
+                return;
+            }
 
+            const headerLine = lines[headerRowIndex];
+            // Определяем разделитель, который был найден в заголовке
+            const separator = ['\t', ';', ',', '|'].find(sep => headerLine.split(sep).length > 5) || '\t';
+            
             rawExcelRows = lines
+                .slice(headerRowIndex) // Берем только с заголовка
                 .filter(line => line.trim() !== '')
                 .map(line => line.split(separator).map(cell => cell.trim()));
+            
+            console.log("Парсинг CSV завершен. Строк найдено:", rawExcelRows.length);
+            console.log("Пример строки:", rawExcelRows[0]);
         }
 
-        const headerIndex = rawExcelRows.findIndex(row => row.includes('Заголовок 1'));
-        if (headerIndex === -1) {
-            alert("Не удалось найти 'Заголовок 1'. Проверьте формат файла.");
-            return;
+        // Если данные есть, запускаем отрисовку
+        if (rawExcelRows && rawExcelRows.length > 0) {
+            analyzeStructureAndProcess();
+            downloadFileBtn.removeAttribute('disabled');
+            downloadFileBtn.className = "bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-3 px-5 rounded-xl transition-all flex items-center gap-2 shadow-md text-sm active:scale-98 cursor-pointer";
+        } else {
+            alert("Данные не были считаны. Проверьте консоль F12.");
         }
-
-        rawExcelRows = rawExcelRows.slice(headerIndex);
-        
-        // ВАЖНО: вызываем функцию отрисовки
-        analyzeStructureAndProcess(); 
-        
-        downloadFileBtn.removeAttribute('disabled');
-        downloadFileBtn.className = "bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-3 px-5 rounded-xl transition-all flex items-center gap-2 shadow-md text-sm active:scale-98 cursor-pointer";
     };
 
-    if (file.name.endsWith('.xlsx') || file.name.endsWith('.xls')) {
+    if (file.name.match(/\.(xlsx|xls)$/)) {
         reader.readAsArrayBuffer(file);
     } else {
         reader.readAsText(file, 'windows-1251');
