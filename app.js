@@ -46,53 +46,51 @@ function handleFileSelect(event) {
     const reader = new FileReader();
 
     reader.onload = function(e) {
-        const text = e.target.result;
-        
-        // 1. Разбиваем файл на строки
-        const lines = text.split(/\r?\n/);
-        
-        // 2. Определяем разделитель (ищем, какой символ чаще всего встречается в первой строке)
-        const firstLine = lines.find(l => l.includes('Заголовок 1'));
-        if (!firstLine) {
-            alert("Не удалось найти строку с заголовками. Проверьте файл.");
-            return;
+        if (file.name.endsWith('.xlsx') || file.name.endsWith('.xls')) {
+            // Для Excel используем штатный парсер
+            const data = new Uint8Array(e.target.result);
+            const workbook = XLSX.read(data, { type: 'array' });
+            const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+            rawExcelRows = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' });
+        } else {
+            // Для CSV/TSV используем наш ручной парсер
+            const text = e.target.result;
+            const lines = text.split(/\r?\n/);
+            const firstLine = lines.find(l => l.includes('Заголовок 1'));
+            
+            const separators = ['\t', ';', '|', ','];
+            let separator = '\t';
+            let maxCols = 0;
+            separators.forEach(sep => {
+                const cols = firstLine.split(sep).length;
+                if (cols > maxCols) { maxCols = cols; separator = sep; }
+            });
+
+            rawExcelRows = lines
+                .filter(line => line.trim() !== '')
+                .map(line => line.split(separator).map(cell => cell.trim()));
         }
 
-        // Пробуем определить: \t, ; или | (Директ иногда чудит)
-        const separators = ['\t', ';', '|', ','];
-        let separator = '\t'; // дефолт
-        let maxCols = 0;
-
-        separators.forEach(sep => {
-            const cols = firstLine.split(sep).length;
-            if (cols > maxCols) {
-                maxCols = cols;
-                separator = sep;
-            }
-        });
-
-        // 3. Парсим строки с выбранным разделителем
-        rawExcelRows = lines
-            .filter(line => line.trim() !== '') // убираем пустые строки
-            .map(line => line.split(separator).map(cell => cell.trim()));
-
-        // 4. Находим индекс заголовка
         const headerIndex = rawExcelRows.findIndex(row => row.includes('Заголовок 1'));
-
         if (headerIndex === -1) {
-            alert("Не удалось найти столбец 'Заголовок 1'. Попробуйте пересохранить файл в Excel как 'CSV (разделители - запятые)'");
+            alert("Не удалось найти 'Заголовок 1'. Проверьте формат файла.");
             return;
         }
 
-        // Обрезаем всё, что выше заголовков
         rawExcelRows = rawExcelRows.slice(headerIndex);
-
-        analyzeStructureAndProcess();
+        
+        // ВАЖНО: вызываем функцию отрисовки
+        analyzeStructureAndProcess(); 
+        
         downloadFileBtn.removeAttribute('disabled');
         downloadFileBtn.className = "bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-3 px-5 rounded-xl transition-all flex items-center gap-2 shadow-md text-sm active:scale-98 cursor-pointer";
     };
 
-    reader.readAsText(file, 'windows-1251'); // У Директа часто такая кодировка
+    if (file.name.endsWith('.xlsx') || file.name.endsWith('.xls')) {
+        reader.readAsArrayBuffer(file);
+    } else {
+        reader.readAsText(file, 'windows-1251');
+    }
 }
 
 function analyzeStructureAndProcess() {
