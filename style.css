@@ -1,6 +1,27 @@
-/* Добавляем белый фон всем ячейкам, чтобы текст не просвечивал */
+/* Базовый стиль ячеек */
 td {
     background-color: white;
+}
+
+/* Убираем ограничение на ширину при редактировании */
+.editable-cell {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    transition: all 0.2s ease;
+}
+
+/* Когда ячейка в фокусе (редактировании), растягиваем её */
+.editable-cell:focus {
+    outline: 2px solid #4f46e5;
+    background-color: #ffffff !important;
+    box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+    z-index: 50 !important; /* Еще выше, чтобы перекрыть всё */
+    position: relative;
+    white-space: normal !important; /* Разрешаем перенос текста */
+    overflow: visible !important;   /* Показываем весь текст */
+    min-width: 300px;              /* Даем место для редактирования */
+    width: auto !important;
 }
 
 .yandex-template {
@@ -12,23 +33,14 @@ td {
 }
 
 .sticky-col {
-    background-color: white !important; /* Устанавливаем белый фон для липких колонок */
-    z-index: 20 !important;             /* Поднимаем их выше обычных ячеек */
+    background-color: white !important;
+    z-index: 20 !important;
 }
 
-/* Добавляем тень справа для визуального отделения при скролле */
 .sticky-col.border-r {
     box-shadow: 2px 0 5px rgba(0,0,0,0.05);
 }
 
 tr:hover .sticky-col {
     background-color: rgb(248, 250, 252) !important;
-}
-
-.editable-cell:focus {
-    outline: 2px solid #4f46e5;
-    background-color: #ffffff !important;
-    box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
-    z-index: 40;
-    position: relative;
 }
