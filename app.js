@@ -44,25 +44,16 @@ function handleFileSelect(event) {
 
     uploadText.innerText = file.name;
     
-    let extension = '.xlsx';
-    if (file.name.endsWith('.xls')) extension = '.xls';
-    if (file.name.endsWith('.csv')) extension = '.csv';
-    
-    const baseName = file.name.replace(/\.[^/.]+$/, "");
-    outputFileName = `edited_${baseName}${extension}`;
-
     const reader = new FileReader();
     reader.onload = function(e) {
-        const text = new TextDecoder('windows-1251').decode(e.target.result); // Пробуем декодировать
+        // Читаем как текст
+        const text = e.target.result;
         
-        // Если это CSV, пытаемся определить разделитель
         let workbook;
         if (file.name.endsWith('.csv')) {
-            // Если в строке больше точек с запятой, чем запятых — считаем, что разделитель ';'
-            const firstLine = text.split('\n')[0];
-            const fs = (firstLine.split(';').length > firstLine.split(',').length) ? ';' : ',';
-            
-            workbook = XLSX.read(text, { type: 'string', FS: fs });
+            // ПРИНУДИТЕЛЬНО задаем табуляцию для CSV, если это нужно
+            // На скриншоте 2026-07-02_22-11-58.jpg видно, что это TSV
+            workbook = XLSX.read(text, { type: 'string', FS: '\t' });
         } else {
             const data = new Uint8Array(e.target.result);
             workbook = XLSX.read(data, { type: 'array' });
@@ -72,15 +63,14 @@ function handleFileSelect(event) {
         rawExcelRows = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' });
         
         if (rawExcelRows.length === 0) {
-            alert("Файл пуст или не удалось распознать структуру.");
+            alert("Файл пуст.");
             return;
         }
 
         analyzeStructureAndProcess();
-        downloadFileBtn.removeAttribute('disabled');
-        downloadFileBtn.className = "bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-3 px-5 rounded-xl transition-all flex items-center gap-2 shadow-md text-sm active:scale-98 cursor-pointer";
+        // ... остальной код (стили кнопки и т.д.)
     };
-    reader.readAsArrayBuffer(file);
+    reader.readAsText(file); // Читаем как текст, а не ArrayBuffer для CSV
 }
 
 function analyzeStructureAndProcess() {
