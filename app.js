@@ -43,34 +43,37 @@ function handleFileSelect(event) {
     if (!file) return;
 
     uploadText.innerText = file.name;
-    
     const reader = new FileReader();
+
     reader.onload = function(e) {
-        // Читаем как текст
         const text = e.target.result;
         
-        let workbook;
-        if (file.name.endsWith('.csv')) {
-            // ПРИНУДИТЕЛЬНО задаем табуляцию для CSV, если это нужно
-            // На скриншоте 2026-07-02_22-11-58.jpg видно, что это TSV
-            workbook = XLSX.read(text, { type: 'string', FS: '\t' });
-        } else {
-            const data = new Uint8Array(e.target.result);
-            workbook = XLSX.read(data, { type: 'array' });
-        }
-
-        const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-        rawExcelRows = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' });
+        // 1. Разбиваем файл на строки
+        const lines = text.split(/\r?\n/);
         
-        if (rawExcelRows.length === 0) {
-            alert("Файл пуст.");
+        // 2. Превращаем строки в массив массивов, разбивая по табуляции (\t)
+        // Если TSV не сработал, попробуем заменить \t на запятую или разбить вручную
+        rawExcelRows = lines.map(line => line.split('\t'));
+
+        // 3. Проверка: нашли ли мы заголовок "Заголовок 1"?
+        // Ищем индекс строки, где есть заголовок
+        const headerIndex = rawExcelRows.findIndex(row => row.includes('Заголовок 1'));
+
+        if (headerIndex === -1) {
+            alert("Не удалось найти столбец 'Заголовок 1'. Проверьте формат файла (он должен быть TSV с табуляцией).");
+            console.log("Первая строка файла для отладки:", rawExcelRows[0]);
             return;
         }
 
+        // Если нашли, обрезаем файл до заголовков
+        rawExcelRows = rawExcelRows.slice(headerIndex);
+
         analyzeStructureAndProcess();
-        // ... остальной код (стили кнопки и т.д.)
+        downloadFileBtn.removeAttribute('disabled');
+        downloadFileBtn.className = "bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-3 px-5 rounded-xl transition-all flex items-center gap-2 shadow-md text-sm active:scale-98 cursor-pointer";
     };
-    reader.readAsText(file); // Читаем как текст, а не ArrayBuffer для CSV
+
+    reader.readAsText(file);
 }
 
 function analyzeStructureAndProcess() {
