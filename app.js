@@ -44,7 +44,6 @@ function handleFileSelect(event) {
 
     uploadText.innerText = file.name;
     
-    // Определяем правильное расширение для результирующего файла
     let extension = '.xlsx';
     if (file.name.endsWith('.xls')) extension = '.xls';
     if (file.name.endsWith('.csv')) extension = '.csv';
@@ -54,16 +53,26 @@ function handleFileSelect(event) {
 
     const reader = new FileReader();
     reader.onload = function(e) {
-        const data = new Uint8Array(e.target.result);
+        const text = new TextDecoder('windows-1251').decode(e.target.result); // Пробуем декодировать
         
-        // codepage: 65001 принудительно открывает CSV в UTF-8, предотвращая проблемы с кириллицей
-        const workbook = XLSX.read(data, { type: 'array', codepage: 65001 });
+        // Если это CSV, пытаемся определить разделитель
+        let workbook;
+        if (file.name.endsWith('.csv')) {
+            // Если в строке больше точек с запятой, чем запятых — считаем, что разделитель ';'
+            const firstLine = text.split('\n')[0];
+            const fs = (firstLine.split(';').length > firstLine.split(',').length) ? ';' : ',';
+            
+            workbook = XLSX.read(text, { type: 'string', FS: fs });
+        } else {
+            const data = new Uint8Array(e.target.result);
+            workbook = XLSX.read(data, { type: 'array' });
+        }
+
         const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-        
         rawExcelRows = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' });
         
         if (rawExcelRows.length === 0) {
-            alert("Файл пуст.");
+            alert("Файл пуст или не удалось распознать структуру.");
             return;
         }
 
