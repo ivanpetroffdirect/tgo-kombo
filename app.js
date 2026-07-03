@@ -1,8 +1,8 @@
 lucide.createIcons();
 
-let rawExcelRows = [];        // Исходная сырая матрица аоа для выгрузки (со всеми дублями)
+let rawExcelRows = [];        // Исходная сырая матрица аоа для выгрузки (со всеми строками)
 let originalHeaders = [];     // Массив заголовков (внутри скрипта уникализирован через _dup)
-let processedDataset = [];    // Массив только УНИКАЛЬНЫХ объявлений для интерфейса
+let processedDataset = [];    // Массив только ТГО объявлений для интерфейса
 let currentFilter = 'all';
 let searchQuery = '';
 let sortDirection = 'none'; 
@@ -88,7 +88,7 @@ function analyzeStructureAndProcess() {
             headerRowIndex = i;
             headerRowGlobalIndex = i;
             
-            // Устраняем дублирование имен колонок (Заголовок 1 для ТГО и Заголовок 1 для Комбинаторики)
+            // Устраняем дублирование имен колонок
             const seenHeaders = {};
             originalHeaders = rowStr.map((header) => {
                 const hName = header || '';
@@ -121,7 +121,7 @@ function analyzeStructureAndProcess() {
     processedDataset = [];
     const seenAdsKeys = new Set();
 
-    // Индексы для слепка контента по всем текстовым колонкам (включая комбинаторные дубликаты _dup)
+    // Индексы для слепка контента по всем текстовым колонкам ТГО
     const textContentIndices = [];
     originalHeaders.forEach((header, idx) => {
         const hLower = header.toLowerCase();
@@ -144,9 +144,15 @@ function analyzeStructureAndProcess() {
         const adType = rowMap[typeHeaderName] || '—';
         const adId = rowMap[idAdHeaderName] || '';
 
-        // Чистые ТГО заголовки (первые вхождения в строке без суффиксов)
+        // Стандартные ТГО заголовки
         const title1 = rowMap[t1HeaderName] || '';
         const title2 = rowMap[t2HeaderName] || '';
+
+        // ПРОВЕРКА НА КОМБИНАТОРИКУ: если стандартный Заголовок 1 пуст, но комбинаторный заполнен — пропускаем строку для интерфейса
+        const isPureCombinatorics = !title1 && rowMap[`${t1HeaderName}_dup1`];
+        if (isPureCombinatorics) {
+            continue; 
+        }
 
         const textContentSnapshot = textContentIndices.map(idx => String(row[idx] || '').trim()).join('|');
         const uniqueKey = adId 
@@ -158,19 +164,7 @@ function analyzeStructureAndProcess() {
         }
         seenAdsKeys.add(uniqueKey);
         
-        // Определяем комбинаторную строку (если ТГО Заголовок 1 пуст, но комбинаторный Заголовок 1_dup1 заполнен)
-        const isPureCombinatorics = !title1 && rowMap[`${t1HeaderName}_dup1`];
-        
-        let analyzedRow;
-        if (isPureCombinatorics) {
-            const combiT1 = rowMap[`${t1HeaderName}_dup1`] || '';
-            analyzedRow = computeRowMetrics(i, combiT1, '', adType, rowMap, uniqueKey);
-            analyzedRow.statusType = 'other-type'; 
-            analyzedRow.statusWeight = 5;
-        } else {
-            analyzedRow = computeRowMetrics(i, title1, title2, adType, rowMap, uniqueKey);
-        }
-        
+        const analyzedRow = computeRowMetrics(i, title1, title2, adType, rowMap, uniqueKey);
         processedDataset.push(analyzedRow);
     }
 
@@ -283,7 +277,7 @@ function updateDashboardStats() {
 
     document.getElementById('statTotal').innerText = total;
     document.getElementById('statSuccess').innerText = success;
-    document.getElementById('statSuccessPct').innerText = `${pct}% от уникальных объявлений`;
+    document.getElementById('statSuccessPct').innerText = `${pct}% от уникальных ТГО`;
     document.getElementById('statCut').innerText = cut;
     document.getElementById('statLoss').innerText = loss;
 }
@@ -301,7 +295,6 @@ function buildTableHeader() {
         <th class="py-4 px-4 bg-slate-100 text-slate-700 sticky left-[600px] z-30 border-r border-slate-300 shadow-[3px_0_5px_rgba(0,0,0,0.05)] min-w-[150px]">Проблемы</th>
     `;
 
-    // Для построения интерфейса убираем суффиксы дубликатов из названий колонок таблицы
     originalHeaders.forEach(header => {
         const cleanDisplayName = String(header || '').split('_dup')[0];
         html += `<th class="py-4 px-4 border-b border-slate-200 text-slate-600 font-semibold">${cleanDisplayName}</th>`;
@@ -357,18 +350,16 @@ function renderFullTable() {
     if (sortDirection === 'asc') displayData.sort((a, b) => a.statusWeight - b.statusWeight);
     else if (sortDirection === 'desc') displayData.sort((a, b) => b.statusWeight - a.statusWeight);
 
-    document.getElementById('tableCounter').innerText = `Уникальных объявлений: ${displayData.length}`;
+    document.getElementById('tableCounter').innerText = `Показано объявлений: ${displayData.length}`;
 
     if (displayData.length === 0) {
         tableBody.innerHTML = `<tr><td colspan="${originalHeaders.length + 5}" class="py-12 text-center text-slate-400">Ничего не найдено.</td></tr>`;
         return;
     }
 
-    // Динамически ищем стандартные индексы длин для ТГО (на базе чистых ТГО колонок под шапкой Длина)
     const lenIndices = [];
     originalHeaders.forEach((headerName, idx) => {
         const hLower = headerName.toLowerCase();
-        // Подсвечиваем ячейки длин, относящиеся к ТГО (первые вхождения без _dup)
         if (hLower.includes('длина') && !hLower.includes('_dup') && (hLower.includes('заголовок') || hLower.includes('текст'))) {
             lenIndices.push(idx);
         }
@@ -442,7 +433,7 @@ function renderFullTable() {
                 editableAttr = `contenteditable="true" data-type="t2"`;
             }
 
-            rowHtml += `<td class="${cellStyle}" ${editableAttr} ${extraDataAttr} title="${(isT1 || isT2) && item.statusType !== 'other-type' ? 'Кликните для редактирования' : displayValue}">${(isT1 || isT2) && item.statusType !== 'other-type' ? formatTemplateText(String(displayValue)) : displayValue}</td>`;
+            rowHtml += `<td class="${cellStyle}" ${editableAttr} ${extraDataAttr} title="${displayValue}">${(isT1 || isT2) && item.statusType !== 'other-type' ? formatTemplateText(String(displayValue)) : displayValue}</td>`;
         });
 
         tr.innerHTML = rowHtml;
@@ -600,12 +591,11 @@ function downloadUpdatedXLSX() {
 
     const exportRows = [];
     
-    // Возвращаем оригинальную техническую шапку из сырых данных без суффиксов _dup
+    // Переносим технические строки шапки без изменений
     for (let i = 0; i <= headerRowGlobalIndex; i++) {
         exportRows.push(rawExcelRows[i]);
     }
 
-    // Карта оригинальных имен колонок для сопоставления индексов Длин
     const rawHeaders = rawExcelRows[headerRowGlobalIndex].map(c => String(c || '').trim());
 
     let startDataRow = headerRowGlobalIndex + 1;
@@ -644,6 +634,7 @@ function downloadUpdatedXLSX() {
             ? `${adType}_id_${adId}_content_${textContentSnapshot}` 
             : `${adType}_content_${textContentSnapshot}`;
 
+        // Ищем строку в отредактированных ТГО данных
         const editedItem = processedDataset.find(item => item.uniqueKey === currentLineKey);
         const singleRowArray = [];
         
@@ -652,11 +643,10 @@ function downloadUpdatedXLSX() {
             const rawHeaderName = rawHeaders[curIdx] || '';
             const hNameLower = internalHeaderName.toLowerCase();
 
-            if (editedItem && editedItem.statusType !== 'other-type') {
+            // Если это ТГО и мы его правили — обновляем данные и пересчитываем длины
+            if (editedItem) {
                 if (hNameLower.includes('длина')) {
-                    // Парсим базовое имя колонки (например, из "Длина Заголовка 1" получаем "Заголовок 1")
                     const targetRawHeader = rawHeaderName.replace(/Длина\s+/i, '').trim();
-                    // Ищем её уникализированный индекс в originalHeaders, чтобы правильно сопоставить ТГО или Комбинаторику
                     const targetInternalIdx = originalHeaders.indexOf(targetRawHeader);
                     
                     if (targetInternalIdx !== -1) {
@@ -668,6 +658,7 @@ function downloadUpdatedXLSX() {
                     val = editedItem.rowMap[internalHeaderName];
                 }
             }
+            // Если editedItem не найден — значит, это комбинаторика. Оставляем её значение `val = row[curIdx]` без изменений.
 
             if (val !== '' && !isNaN(val) && hNameLower.includes('длина')) {
                 singleRowArray.push(Number(val));
