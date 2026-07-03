@@ -1,6 +1,6 @@
 lucide.createIcons();
 
-let rawExcelRows = [];       // Исходная сырая матрица аоа для выгрузки
+let rawExcelRows = [];    // Исходная сырая матрица аоа для выгрузки
 let originalHeaders = [];    // Чистый массив заголовков
 let processedDataset = [];   // Наш структурированный массив объектов
 let currentFilter = 'all';
@@ -22,6 +22,7 @@ const filterBtns = document.querySelectorAll('.filter-btn');
 const downloadFileBtn = document.getElementById('downloadFileBtn');
 const searchInput = document.getElementById('tableSearch');
 const liveCounter = document.getElementById('liveCharCounter');
+const titleTooltip = document.getElementById('titleTooltip'); // Элемент для быстрого предпросмотра
 
 fileInput.addEventListener('change', handleFileSelect);
 downloadFileBtn.addEventListener('click', downloadUpdatedXLSX);
@@ -302,7 +303,7 @@ function renderFullTable() {
 
         let rowHtml = `
             <td class="p-3 sticky-col sticky left-0 z-10 border-r border-slate-200 shadow-[2px_0_5px_rgba(0,0,0,0.02)]">${statusBadge}</td>
-            <td class="p-3 sticky-col sticky left-[150px] z-10 border-r border-slate-200 shadow-[2px_0_5px_rgba(0,0,0,0.02)] font-medium text-slate-900 max-w-[200px] truncate" title="${item.combined}">${formatTemplateText(item.combined)}</td>
+            <td class="p-3 sticky-col sticky left-[150px] z-10 border-r border-slate-200 shadow-[2px_0_5px_rgba(0,0,0,0.02)] font-medium text-slate-900 max-w-[200px] truncate tooltip-target cursor-help" data-combined="${item.combined}">${formatTemplateText(item.combined)}</td>
             <td class="p-3 sticky-col sticky left-[350px] z-10 border-r border-slate-200 text-center font-mono font-bold ${item.overflow > 0 ? 'text-rose-600' : 'text-slate-300'}">${item.overflow > 0 ? `+${item.overflow}` : '0'}</td>
             <td class="p-3 sticky-col sticky left-[460px] z-10 border-r border-slate-300 shadow-[3px_0_5px_rgba(0,0,0,0.04)]">${issueText}</td>
         `;
@@ -349,6 +350,38 @@ function renderFullTable() {
 
     lucide.createIcons();
     initInlineEditingEvents();
+    initTooltipEvents();
+}
+
+function initTooltipEvents() {
+    const targets = tableBody.querySelectorAll('.tooltip-target');
+    
+    targets.forEach(target => {
+        target.addEventListener('mouseenter', function() {
+            const text = target.getAttribute('data-combined');
+            if (!text) return;
+            
+            if (titleTooltip) {
+                titleTooltip.innerHTML = formatTemplateText(text);
+                titleTooltip.classList.remove('hidden');
+                
+                const rect = target.getBoundingClientRect();
+                const tooltipRect = titleTooltip.getBoundingClientRect();
+                
+                let left = rect.left + window.scrollX + (rect.width / 2) - (tooltipRect.width / 2);
+                let top = rect.top + window.scrollY - tooltipRect.height - 8;
+                
+                if (left < 10) left = 10;
+                
+                titleTooltip.style.left = `${left}px`;
+                titleTooltip.style.top = `${top}px`;
+            }
+        });
+        
+        target.addEventListener('mouseleave', function() {
+            if (titleTooltip) titleTooltip.classList.add('hidden');
+        });
+    });
 }
 
 function initInlineEditingEvents() {
@@ -426,7 +459,7 @@ function initInlineEditingEvents() {
             const statusCell = tr.querySelector('td:nth-child(1)');
 
             combinedCell.innerHTML = formatTemplateText(dataItem.combined);
-            combinedCell.setAttribute('title', dataItem.combined);
+            combinedCell.setAttribute('data-combined', dataItem.combined);
             
             overflowCell.innerText = dataItem.overflow > 0 ? `+${dataItem.overflow}` : '0';
             overflowCell.className = `p-3 sticky-col sticky left-[350px] z-10 border-r border-slate-200 text-center font-mono font-bold ${dataItem.overflow > 0 ? 'text-rose-600' : 'text-slate-300'}`;
