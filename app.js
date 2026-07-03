@@ -106,11 +106,23 @@ function analyzeStructureAndProcess() {
         }
     }
 
+    // Находим индекс столбца "Тип объявления"
+    const typeHeaderIdx = originalHeaders.findIndex(h => h.toLowerCase().trim() === 'тип объявления');
+
     processedDataset = [];
 
     for (let i = startDataRow; i < rawExcelRows.length; i++) {
         const row = rawExcelRows[i];
         if (!row || row.length === 0) continue;
+
+        // Если столбец "Тип объявления" найден, проверяем его значение
+        if (typeHeaderIdx !== -1) {
+            const adType = row[typeHeaderIdx] !== undefined ? String(row[typeHeaderIdx]).trim() : '';
+            // Пропускаем строку, если это НЕ текстово-графическое объявление
+            if (adType && adType.toLowerCase() !== 'текстово-графическое') {
+                continue; 
+            }
+        }
 
         const rowMap = {};
         originalHeaders.forEach((header, colIdx) => {
