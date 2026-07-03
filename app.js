@@ -1,8 +1,8 @@
 lucide.createIcons();
 
-let rawExcelRows = [];    // Исходная сырая матрица аоа для выгрузки
-let originalHeaders = [];    // Чистый массив заголовков
-let processedDataset = [];   // Наш структурированный массив объектов
+let rawExcelRows = [];        // Исходная сырая матрица аоа для выгрузки (со всеми дублями)
+let originalHeaders = [];     // Чистый массив заголовков
+let processedDataset = [];    // Наш массив только УНИКАЛЬНЫХ объявлений для интерфейса
 let currentFilter = 'all';
 let searchQuery = '';
 let sortDirection = 'none'; 
@@ -12,7 +12,8 @@ let outputFileName = 'compiled_campaign.xlsx';
 let t1HeaderName = 'Заголовок 1';
 let t2HeaderName = 'Заголовок 2';
 let textHeaderName = 'Текст';
-let typeHeaderName = 'Тип объявления'; // Добавили отслеживание типа
+let typeHeaderName = 'Тип объявления';
+let idAdHeaderName = 'ID объявления'; // Для дополнительной точности связей
 let headerRowGlobalIndex = -1;
 
 const fileInput = document.getElementById('excelFile');
@@ -105,6 +106,8 @@ function analyzeStructureAndProcess() {
     }
 
     processedDataset = [];
+    // Хранилище уникальных ключей для дедупликации в интерфейсе
+    const seenAdsKeys = new Set();
 
     for (let i = startDataRow; i < rawExcelRows.length; i++) {
         const row = rawExcelRows[i];
@@ -115,12 +118,24 @@ function analyzeStructureAndProcess() {
             rowMap[header] = row[colIdx] !== undefined ? String(row[colIdx]).trim() : '';
         });
 
-        // Теперь мы НЕ пропускаем строки без Заголовка 1 (---, пустые, комбинаторные и т.д.)
         const title1 = rowMap[t1HeaderName] || '';
         const title2 = rowMap[t2HeaderName] || '';
+        const text = rowMap[textHeaderName] || '';
         const adType = rowMap[typeHeaderName] || '—';
+        const adId = rowMap[idAdHeaderName] || '';
+
+        // Генерируем уникальный ключ объявления. Если ID есть — по нему, если нет (новое) — по контенту
+        const uniqueKey = adId ? `${adType}_id_${adId}` : `${adType}_${title1}_${title2}_${text}`;
+
+        if (seenAdsKeys.has(uniqueKey)) {
+            // Если такое объявление уже добавлено в интерфейс, мы просто пропускаем его вывод,
+            // но структура rawExcelRows хранит его для будущей массовой выгрузки
+            continue;
+        }
+
+        seenAdsKeys.add(uniqueKey);
         
-        const analyzedRow = computeRowMetrics(i, title1, title2, adType, rowMap);
+        const analyzedRow = computeRowMetrics(i, title1, title2, adType, rowMap, uniqueKey);
         processedDataset.push(analyzedRow);
     }
 
@@ -129,13 +144,13 @@ function analyzeStructureAndProcess() {
     renderFullTable();
 }
 
-function computeRowMetrics(rowIndex, t1, t2, adType, rowMap) {
+function computeRowMetrics(rowIndex, t1, t2, adType, rowMap, uniqueKey) {
     const cleanTitle2 = (t2 === '-' || t2 === '0') ? '' : t2;
 
-    // Если это техническая строка или тип объявления не подразумевает классические заголовки
     if (!t1 || t1 === '-' || t1.startsWith('---')) {
         return {
             rowIndex: rowIndex,
+            uniqueKey: uniqueKey,
             t1: t1,
             t2: cleanTitle2,
             adType: adType,
@@ -153,6 +168,7 @@ function computeRowMetrics(rowIndex, t1, t2, adType, rowMap) {
     if (!cleanTitle2) {
         return {
             rowIndex: rowIndex,
+            uniqueKey: uniqueKey,
             t1: t1,
             t2: '',
             adType: adType,
@@ -197,6 +213,7 @@ function computeRowMetrics(rowIndex, t1, t2, adType, rowMap) {
 
     return {
         rowIndex: rowIndex,
+        uniqueKey: uniqueKey,
         t1: t1,
         t2: cleanTitle2,
         adType: adType,
@@ -231,13 +248,12 @@ function updateDashboardStats() {
 
     document.getElementById('statTotal').innerText = total;
     document.getElementById('statSuccess').innerText = success;
-    document.getElementById('statSuccessPct').innerText = `${pct}% от всех объявлений`;
+    document.getElementById('statSuccessPct').innerText = `${pct}% от уникальных объявлений`;
     document.getElementById('statCut').innerText = cut;
     document.getElementById('statLoss').innerText = loss;
 }
 
 function buildTableHeader() {
-    // Добавили фиксированный столбец "Тип объявления" в шапку таблицы перед "Итоговым заголовком"
     let html = `
         <th id="sortStatusBtn" class="py-4 px-4 bg-slate-100 text-slate-700 sticky left-0 z-30 border-r border-slate-200 shadow-[2px_0_5px_rgba(0,0,0,0.03)] min-w-[150px] cursor-pointer hover:bg-slate-200 transition-colors select-none">
             <div class="flex items-center gap-1.5">
@@ -304,7 +320,7 @@ function renderFullTable() {
     if (sortDirection === 'asc') displayData.sort((a, b) => a.statusWeight - b.statusWeight);
     else if (sortDirection === 'desc') displayData.sort((a, b) => b.statusWeight - a.statusWeight);
 
-    document.getElementById('tableCounter').innerText = `Строк: ${displayData.length}`;
+    document.getElementById('tableCounter').innerText = `Уникальных объявлений: ${displayData.length}`;
 
     if (displayData.length === 0) {
         tableBody.innerHTML = `<tr><td colspan="${originalHeaders.length + 5}" class="py-12 text-center text-slate-400">Ничего не найдено.</td></tr>`;
@@ -317,7 +333,7 @@ function renderFullTable() {
     displayData.forEach(item => {
         const tr = document.createElement('tr');
         tr.className = "hover:bg-slate-50/80 transition-colors group";
-        tr.setAttribute('data-row-index', item.rowIndex);
+        tr.setAttribute('data-unique-key', item.uniqueKey);
 
         let statusBadge = '';
         let rowBgClass = '';
@@ -325,7 +341,6 @@ function renderFullTable() {
 
         if (item.statusType === 'no-t2') {
             statusBadge = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200"><i data-lucide="minus-circle" class="w-3 h-3"></i> Нет доп. заголовка</span>`;
-            rowBgClass = 'hover:bg-slate-50/80';
         } else if (item.statusType === 'lost-utp') {
             statusBadge = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-bold bg-rose-50 text-rose-700 border border-rose-200"><i data-lucide="alert-circle" class="w-3 h-3"></i> Доп. заголовок будет отброшен</span>`;
             rowBgClass = 'bg-rose-50/10 hover:bg-rose-50/20';
@@ -342,7 +357,6 @@ function renderFullTable() {
 
         if (rowBgClass) tr.className = rowBgClass + " transition-colors group";
 
-        // Обновили отступы sticky-столбцов с учетом новой колонки "Тип объявления"
         let rowHtml = `
             <td class="p-3 sticky-col sticky left-0 z-10 border-r border-slate-200 shadow-[2px_0_5px_rgba(0,0,0,0.02)] bg-inherit">${statusBadge}</td>
             <td class="p-3 sticky-col sticky left-[150px] z-10 border-r border-slate-200 bg-inherit font-medium text-slate-700 text-xs">${item.adType}</td>
@@ -353,7 +367,6 @@ function renderFullTable() {
 
         originalHeaders.forEach((headerName, curIdx) => {
             let displayValue = item.rowMap[headerName] || '';
-            
             let isT1 = (headerName === t1HeaderName);
             let isT2 = (headerName === t2HeaderName);
             
@@ -375,7 +388,6 @@ function renderFullTable() {
                 }
             }
             
-            // Запрещаем редактирование пустых/нерелевантных ячеек для "других" типов
             if (isT1 && item.statusType !== 'other-type') {
                 cellStyle += " bg-indigo-50/40 text-slate-900 font-medium editable-cell cursor-text";
                 editableAttr = `contenteditable="true" data-type="t1"`;
@@ -399,29 +411,22 @@ function renderFullTable() {
 
 function initTooltipEvents() {
     const targets = tableBody.querySelectorAll('.tooltip-target');
-    
     targets.forEach(target => {
         target.addEventListener('mouseenter', function() {
             const text = target.getAttribute('data-combined');
             if (!text || text === '—') return;
-            
             if (titleTooltip) {
                 titleTooltip.innerHTML = formatTemplateText(text);
                 titleTooltip.classList.remove('hidden');
-                
                 const rect = target.getBoundingClientRect();
                 const tooltipRect = titleTooltip.getBoundingClientRect();
-                
                 let left = rect.left + window.scrollX + (rect.width / 2) - (tooltipRect.width / 2);
                 let top = rect.top + window.scrollY - tooltipRect.height - 8;
-                
                 if (left < 10) left = 10;
-                
                 titleTooltip.style.left = `${left}px`;
                 titleTooltip.style.top = `${top}px`;
             }
         });
-        
         target.addEventListener('mouseleave', function() {
             if (titleTooltip) titleTooltip.classList.add('hidden');
         });
@@ -459,9 +464,9 @@ function initInlineEditingEvents() {
         });
 
         cell.addEventListener('focus', function(e) {
-            const rowIndex = parseInt(cell.closest('tr').getAttribute('data-row-index'));
+            const uniqueKey = cell.closest('tr').getAttribute('data-unique-key');
             const editType = cell.getAttribute('data-type');
-            const dataItem = processedDataset.find(item => item.rowIndex === rowIndex);
+            const dataItem = processedDataset.find(item => item.uniqueKey === uniqueKey);
             if (dataItem) {
                 cell.innerText = editType === 't1' ? dataItem.t1 : dataItem.t2;
             }
@@ -477,11 +482,11 @@ function initInlineEditingEvents() {
             liveCounter.classList.add('hidden');
             
             const tr = cell.closest('tr');
-            const rowIndex = parseInt(tr.getAttribute('data-row-index'));
+            const uniqueKey = tr.getAttribute('data-unique-key');
             const editType = cell.getAttribute('data-type');
             const newText = cell.innerText.trim();
 
-            const dataItem = processedDataset.find(item => item.rowIndex === rowIndex);
+            const dataItem = processedDataset.find(item => item.uniqueKey === uniqueKey);
             if (!dataItem) return;
 
             if (editType === 't1') {
@@ -492,14 +497,14 @@ function initInlineEditingEvents() {
                 dataItem.rowMap[t2HeaderName] = newText;
             }
 
-            const updatedMetrics = computeRowMetrics(rowIndex, dataItem.t1, dataItem.t2, dataItem.adType, dataItem.rowMap);
+            const updatedMetrics = computeRowMetrics(dataItem.rowIndex, dataItem.t1, dataItem.t2, dataItem.adType, dataItem.rowMap, uniqueKey);
             Object.assign(dataItem, updatedMetrics);
 
             updateDashboardStats();
             
-            const combinedCell = tr.querySelector('td:nth-child(3)'); // Сдвиг на 1 позицию вправо
-            const overflowCell = tr.querySelector('td:nth-child(4)'); // Сдвиг на 1 позицию вправо
-            const issueCell = tr.querySelector('td:nth-child(5)');    // Сдвиг на 1 позицию вправо
+            const combinedCell = tr.querySelector('td:nth-child(3)');
+            const overflowCell = tr.querySelector('td:nth-child(4)');
+            const issueCell = tr.querySelector('td:nth-child(5)');
             const statusCell = tr.querySelector('td:nth-child(1)');
 
             combinedCell.innerHTML = formatTemplateText(dataItem.combined);
@@ -548,29 +553,65 @@ function initInlineEditingEvents() {
 function downloadUpdatedXLSX() {
     if (processedDataset.length === 0) return;
 
+    // Генерируем массив строк на выгрузку на базе исходной rawExcelRows
     const exportRows = [];
     
+    // Копируем техническую шапку
     for (let i = 0; i <= headerRowGlobalIndex; i++) {
         exportRows.push(rawExcelRows[i]);
     }
 
+    const t1ColIdx = originalHeaders.indexOf(t1HeaderName);
+    const t2ColIdx = originalHeaders.indexOf(t2HeaderName);
     const textColIdx = originalHeaders.indexOf(textHeaderName);
+    const typeColIdx = originalHeaders.indexOf(typeHeaderName);
+    const idAdColIdx = originalHeaders.indexOf(idAdHeaderName);
     const lenIndices = (textColIdx !== -1) ? [textColIdx + 1, textColIdx + 2, textColIdx + 3] : [];
 
-    processedDataset.forEach(item => {
+    // Бежим по ВСЕМ строкам исходного Excel (начиная со строк данных)
+    let startDataRow = headerRowGlobalIndex + 1;
+    if (startDataRow < rawExcelRows.length && rawExcelRows[startDataRow]) {
+        const checkRow = rawExcelRows[startDataRow].map(c => String(c || '').toLowerCase().trim());
+        if (checkRow.includes('заголовок 1') || checkRow.includes('текст') || checkRow.some(c => c === '55' || c === '35')) {
+            startDataRow++;
+        }
+    }
+
+    for (let i = startDataRow; i < rawExcelRows.length; i++) {
+        const row = rawExcelRows[i];
+        if (!row || row.length === 0) {
+            exportRows.push(row);
+            continue;
+        }
+
+        // Вычисляем ключ текущей строки
+        const title1 = row[t1ColIdx] !== undefined ? String(row[t1ColIdx]).trim() : '';
+        const title2 = row[t2ColIdx] !== undefined ? String(row[t2ColIdx]).trim() : '';
+        const text = row[textColIdx] !== undefined ? String(row[textColIdx]).trim() : '';
+        const adType = row[typeColIdx] !== undefined ? String(row[typeColIdx]).trim() : '—';
+        const adId = idAdColIdx !== -1 && row[idAdColIdx] !== undefined ? String(row[idAdColIdx]).trim() : '';
+
+        const currentLineKey = adId ? `${adType}_id_${adId}` : `${adType}_${title1}_${title2}_${text}`;
+
+        // Ищем, правили ли мы это объявление в интерфейсе
+        const editedItem = processedDataset.find(item => item.uniqueKey === currentLineKey);
+
         const singleRowArray = [];
         originalHeaders.forEach((headerName, curIdx) => {
-            let val = item.rowMap[headerName] || '';
-            
-            if (lenIndices.includes(curIdx)) {
-                // Длины пересчитываем только для стандартных объявлений, у которых есть эти поля
-                if (item.statusType !== 'other-type') {
-                    if (curIdx === lenIndices[0]) val = item.t1.length;
-                    else if (curIdx === lenIndices[1]) val = item.t2.length;
-                    else if (curIdx === lenIndices[2]) val = (item.rowMap[textHeaderName] || '').length;
+            let val = row[curIdx] !== undefined ? row[curIdx] : '';
+
+            if (editedItem && editedItem.statusType !== 'other-type') {
+                // Если объявление редактировалось — подменяем контент и пересчитываем длины МАССОВО для всех дублей
+                if (curIdx === t1ColIdx) val = editedItem.t1;
+                else if (curIdx === t2ColIdx) val = editedItem.t2;
+                else if (lenIndices.includes(curIdx)) {
+                    if (curIdx === lenIndices[0]) val = editedItem.t1.length;
+                    else if (curIdx === lenIndices[1]) val = editedItem.t2.length;
+                    else if (curIdx === lenIndices[2]) val = text.length;
                 }
             }
-            
+
+            // Корректное приведение числовых длин
             if (val !== '' && !isNaN(val) && (lenIndices.includes(curIdx) || headerName.toLowerCase().includes('длина'))) {
                 singleRowArray.push(Number(val));
             } else {
@@ -578,7 +619,7 @@ function downloadUpdatedXLSX() {
             }
         });
         exportRows.push(singleRowArray);
-    });
+    }
 
     const wb = XLSX.utils.book_new();
     const ws = XLSX.utils.aoa_to_sheet(exportRows);
