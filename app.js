@@ -152,7 +152,11 @@ function handleFileSelect(event) {
         const rowStr = rawExcelRows[i].map(cell => String(cell || '').trim());
         
         const foundT1 = rowStr.indexOf(t1HeaderName);
-        const hasIdCol = rowStr.some(c => c.includes('ID объявления') || c.includes('ID группы'));
+        // Более гибкий поиск строки заголовков
+        const hasIdCol = rowStr.some(c => {
+            const low = c.toLowerCase();
+            return low.includes('id') || low.includes('номер') || low.includes('групп') || low.includes('объявл');
+        });
 
         if (foundT1 !== -1 && hasIdCol) {
             headerRowIndex = i;
@@ -175,9 +179,14 @@ function handleFileSelect(event) {
         }
     }
 
-    processedDataset = [];
+    // Автоматически находим точные названия колонок для дедупликации (независимо от регистра)
+    const lowerHeaders = originalHeaders.map(h => h.toLowerCase().trim());
     
-    // Используем Set для отслеживания уже обработанных уникальных объявлений
+    const exactGroupKey = originalHeaders[lowerHeaders.findIndex(h => h.includes('id группы') || h === 'группа' || h.includes('номер группы'))] || '';
+    const exactAdKey = originalHeaders[lowerHeaders.findIndex(h => h.includes('id объявления') || h === 'объявление' || h.includes('номер объявления'))] || '';
+    const exactTextKey = originalHeaders[lowerHeaders.findIndex(h => h === 'текст' || h.includes('текст объявления'))] || textHeaderName;
+
+    processedDataset = [];
     const uniqueAdsKeys = new Set();
 
     for (let i = startDataRow; i < rawExcelRows.length; i++) {
@@ -193,22 +202,26 @@ function handleFileSelect(event) {
         if (!title1 || title1 === '-' || title1.startsWith('---')) continue; 
 
         const title2 = rowMap[t2HeaderName] || '';
-        const adText = rowMap[textHeaderName] || '';
-        const groupId = rowMap['ID группы'] || rowMap['ID группы объявления'] || '';
-        const adId = rowMap['ID объявления'] || '';
+        const adText = exactTextKey ? (rowMap[exactTextKey] || '') : '';
+        const groupId = exactGroupKey ? (rowMap[exactGroupKey] || '') : '';
+        const adId = exactAdKey ? (rowMap[exactAdKey] || '') : '';
 
-        // Формируем уникальный составной ключ для объявления.
-        // Если есть ID объявления — берем его, если нет — связку Группа + Т1 + Т2 + Текст.
-        const adKey = adId 
-            ? `id_${adId}` 
-            : `fields_${groupId}_${title1}_${title2}_${adText}`;
+        // Генерируем надежный ключ. Если колонок ID нет, ключ построится по Т1 + Т2 + Текст, 
+        // что тоже корректно отсечет полные текстовые дубли.
+        let adKey = '';
+        if (adId && adId !== '-') {
+            adKey = `id_${adId}`;
+        } else {
+            adKey = `fields_${groupId}_${title1.toLowerCase()}_${title2.toLowerCase()}_${adText.toLowerCase()}`;
+        }
 
-        // Если такое объявление уже встречалось, пропускаем его строку и не выводим в таблицу
+        // Если ключ пустой (все поля пустые), пропускаем строку
+        if (adKey === 'fields____') continue;
+
         if (uniqueAdsKeys.has(adKey)) {
             continue;
         }
         
-        // Запоминаем ключ, чтобы не пропустить дубликат далее
         uniqueAdsKeys.add(adKey);
 
         const analyzedRow = computeRowMetrics(i, title1, title2, rowMap);
@@ -218,7 +231,7 @@ function handleFileSelect(event) {
     updateDashboardStats();
     buildTableHeader();
     renderFullTable();
-    saveStateToDB(); // Сохраняем первичную загрузку без дубликатов
+    saveStateToDB(); 
 }
 
 function computeRowMetrics(rowIndex, t1, t2, rowMap) {
