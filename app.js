@@ -22,7 +22,7 @@ const filterBtns = document.querySelectorAll('.filter-btn');
 const downloadFileBtn = document.getElementById('downloadFileBtn');
 const searchInput = document.getElementById('tableSearch');
 const liveCounter = document.getElementById('liveCharCounter');
-const titleTooltip = document.getElementById('titleTooltip'); // Элемент для быстрого предпросмотра
+const titleTooltip = document.getElementById('titleTooltip'); 
 
 fileInput.addEventListener('change', handleFileSelect);
 downloadFileBtn.addEventListener('click', downloadUpdatedXLSX);
@@ -38,6 +38,85 @@ filterBtns.forEach(btn => {
         renderFullTable();
     });
 });
+
+// ==========================================
+// БЛОК РАБОТЫ С INDEXEDDB (АВТОСОХРАНЕНИЕ)
+// ==========================================
+const DB_NAME = 'YandexDirectAppDB';
+const DB_VERSION = 1;
+const STORE_NAME = 'AppState';
+
+function openDB() {
+    return new Promise((resolve, reject) => {
+        const request = indexedDB.open(DB_NAME, DB_VERSION);
+        request.onupgradeneeded = (e) => {
+            const db = e.target.result;
+            if (!db.objectStoreNames.contains(STORE_NAME)) {
+                db.createObjectStore(STORE_NAME);
+            }
+        };
+        request.onsuccess = (e) => resolve(e.target.result);
+        request.onerror = (e) => reject(e.target.error);
+    });
+}
+
+async function saveStateToDB() {
+    try {
+        const db = await openDB();
+        const tx = db.transaction(STORE_NAME, 'readwrite');
+        const store = tx.objectStore(STORE_NAME);
+        
+        const state = {
+            rawExcelRows,
+            originalHeaders,
+            processedDataset,
+            outputFileName,
+            headerRowGlobalIndex
+        };
+        
+        store.put(state, 'current_session');
+    } catch (err) {
+        console.error('Ошибка сохранения данных в IndexedDB:', err);
+    }
+}
+
+async function loadStateFromDB() {
+    try {
+        const db = await openDB();
+        const tx = db.transaction(STORE_NAME, 'readonly');
+        const store = tx.objectStore(STORE_NAME);
+        
+        return new Promise((resolve) => {
+            const request = store.get('current_session');
+            request.onsuccess = () => resolve(request.result || null);
+            request.onerror = () => resolve(null);
+        });
+    } catch (err) {
+        console.error('Ошибка загрузки данных из IndexedDB:', err);
+        return null;
+    }
+}
+
+// Инициализация при загрузке страницы
+document.addEventListener('DOMContentLoaded', async () => {
+    const savedState = await loadStateFromDB();
+    if (savedState && savedState.processedDataset && savedState.processedDataset.length > 0) {
+        rawExcelRows = savedState.rawExcelRows || [];
+        originalHeaders = savedState.originalHeaders || [];
+        processedDataset = savedState.processedDataset || [];
+        outputFileName = savedState.outputFileName || 'compiled_campaign.xlsx';
+        headerRowGlobalIndex = savedState.headerRowGlobalIndex !== undefined ? savedState.headerRowGlobalIndex : -1;
+        
+        uploadText.innerText = `Восстановлено: ${outputFileName}`;
+        downloadFileBtn.removeAttribute('disabled');
+        downloadFileBtn.className = "bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-3 px-5 rounded-xl transition-all flex items-center gap-2 shadow-md text-sm active:scale-98 cursor-pointer";
+        
+        updateDashboardStats();
+        buildTableHeader();
+        renderFullTable();
+    }
+});
+// ==========================================
 
 function handleFileSelect(event) {
     const file = event.target.files[0];
@@ -104,7 +183,6 @@ function analyzeStructureAndProcess() {
     }
 
     processedDataset = [];
-    const uniqueAds = new Set(); // Хранилище уникальных ключей объявлений для исключения дублей
 
     for (let i = startDataRow; i < rawExcelRows.length; i++) {
         const row = rawExcelRows[i];
@@ -119,12 +197,6 @@ function analyzeStructureAndProcess() {
         if (!title1 || title1 === '-' || title1.startsWith('---')) continue; 
 
         const title2 = rowMap[t2HeaderName] || '';
-        const adText = rowMap[textHeaderName] || '';
-        
-        // Создаем уникальный ключ объявления на основе Заголовка 1, Заголовка 2 и Текста
-        const adKey = `${title1.toLowerCase()}|||${title2.toLowerCase()}|||${adText.toLowerCase()}`;
-        if (uniqueAds.has(adKey)) continue; // Если дубль обнаружен, пропускаем строку
-        uniqueAds.add(adKey);
         
         const analyzedRow = computeRowMetrics(i, title1, title2, rowMap);
         processedDataset.push(analyzedRow);
@@ -133,6 +205,7 @@ function analyzeStructureAndProcess() {
     updateDashboardStats();
     buildTableHeader();
     renderFullTable();
+    saveStateToDB(); // Сохраняем первичную загрузку
 }
 
 function computeRowMetrics(rowIndex, t1, t2, rowMap) {
@@ -143,7 +216,6 @@ function computeRowMetrics(rowIndex, t1, t2, rowMap) {
     let totalLength = t1.length;
     let overflow = 0;
 
-    // Проверяем, пустой ли Заголовок 2
     if (!cleanTitle2) {
         return {
             rowIndex: rowIndex,
@@ -153,31 +225,27 @@ function computeRowMetrics(rowIndex, t1, t2, rowMap) {
             isMerged: true,
             length: t1.length,
             overflow: 0,
-            statusType: 'no-t2', // Новый статус для пустых З2
+            statusType: 'no-t2',
             statusWeight: 4, 
             utpReasons: [],
             rowMap: rowMap 
         };
     }
 
-    if (cleanTitle2) {
-        const potential = t1 + ". " + cleanTitle2;
-        if (potential.length <= 56) {
-            combinedTitle = potential;
-            isMerged = true;
-            totalLength = potential.length;
-        } else {
-            overflow = potential.length - 56;
-        }
-    } else {
+    const potential = t1 + ". " + cleanTitle2;
+    if (potential.length <= 56) {
+        combinedTitle = potential;
         isMerged = true;
+        totalLength = potential.length;
+    } else {
+        overflow = potential.length - 56;
     }
 
     const utpAnalysis = analyzeUTPLoss(cleanTitle2);
     let statusType = 'success';
     let statusWeight = 1;
 
-    if (!isMerged && cleanTitle2) {
+    if (!isMerged) {
         if (utpAnalysis.lost) {
             statusType = 'lost-utp';
             statusWeight = 3;
@@ -215,7 +283,7 @@ function analyzeUTPLoss(t2) {
 
 function updateDashboardStats() {
     const total = processedDataset.length;
-    const success = processedDataset.filter(d => d.statusType === 'success').length;
+    const success = processedDataset.filter(d => d.statusType === 'success' || d.statusType === 'no-t2').length;
     const cut = processedDataset.filter(d => d.statusType === 'lost-safe').length;
     const loss = processedDataset.filter(d => d.statusType === 'lost-utp').length;
     const pct = total > 0 ? Math.round((success / total) * 100) : 0;
@@ -275,9 +343,7 @@ function renderFullTable() {
 
     let displayData = [...processedDataset];
     
-    // Новая логика фильтрации кнопок
     if (currentFilter === 'has-t2') {
-        // Фильтр "Есть доп. заголовок": исключаем строки, где З2 пустой
         displayData = displayData.filter(item => item.statusType !== 'no-t2');
     } else if (currentFilter !== 'all') {
         displayData = displayData.filter(item => item.statusType === currentFilter);
@@ -314,9 +380,8 @@ function renderFullTable() {
         let issueText = '—';
 
         if (item.statusType === 'no-t2') {
-            // Вывод кастомного статуса для объявлений без З2
-            statusBadge = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-slate-100 text-slate-600 border border-slate-200"><i data-lucide="minus-circle" class="w-3 h-3"></i> Нет доп. заг-ка</span>`;
-            rowBgClass = 'bg-slate-50/40 text-slate-400';
+            statusBadge = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200"><i data-lucide="minus-circle" class="w-3 h-3"></i> Нет доп. заголовка</span>`;
+            rowBgClass = 'hover:bg-slate-50/80';
         } else if (item.statusType === 'lost-utp') {
             statusBadge = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-bold bg-rose-50 text-rose-700 border border-rose-200"><i data-lucide="alert-circle" class="w-3 h-3"></i> Доп. заголовок будет отброшен</span>`;
             rowBgClass = 'bg-rose-50/10 hover:bg-rose-50/20';
@@ -328,8 +393,7 @@ function renderFullTable() {
             statusBadge = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200"><i data-lucide="check" class="w-3 h-3"></i> Перенесется</span>`;
         }
 
-        if (rowBgClass && item.statusType !== 'no-t2') tr.className = rowBgClass;
-        if (item.statusType === 'no-t2') tr.className = rowBgClass + " transition-colors group";
+        if (rowBgClass) tr.className = rowBgClass + " transition-colors group";
 
         let rowHtml = `
             <td class="p-3 sticky-col sticky left-0 z-10 border-r border-slate-200 shadow-[2px_0_5px_rgba(0,0,0,0.02)]">${statusBadge}</td>
@@ -501,9 +565,9 @@ function initInlineEditingEvents() {
             if (lenT2Cell) lenT2Cell.innerText = dataItem.t2.length;
 
             if (dataItem.statusType === 'no-t2') {
-                statusCell.innerHTML = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-slate-100 text-slate-600 border border-slate-200"><i data-lucide="minus-circle" class="w-3 h-3"></i> Нет доп. заг-ка</span>`;
+                statusCell.innerHTML = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200"><i data-lucide="minus-circle" class="w-3 h-3"></i> Нет доп. заголовка</span>`;
                 issueCell.innerHTML = '—';
-                tr.className = "bg-slate-50/40 text-slate-400 transition-colors group";
+                tr.className = "hover:bg-slate-50/80 transition-colors group";
             } else if (dataItem.statusType === 'lost-utp') {
                 statusCell.innerHTML = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-bold bg-rose-50 text-rose-700 border border-rose-200"><i data-lucide="alert-circle" class="w-3 h-3"></i> Доп. заголовок будет отброшен</span>`;
                 issueCell.innerHTML = `<span class="text-rose-600 font-semibold text-xs">Теряет УТП: ${dataItem.utpReasons.join(', ')}</span>`;
@@ -520,6 +584,8 @@ function initInlineEditingEvents() {
 
             cell.innerHTML = formatTemplateText(newText);
             lucide.createIcons();
+            
+            saveStateToDB(); // Сохраняем изменения после каждого редактирования «на лету»
         });
 
         cell.addEventListener('keydown', function(e) {
