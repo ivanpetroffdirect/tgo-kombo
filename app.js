@@ -22,7 +22,7 @@ const filterBtns = document.querySelectorAll('.filter-btn');
 const downloadFileBtn = document.getElementById('downloadFileBtn');
 const searchInput = document.getElementById('tableSearch');
 const liveCounter = document.getElementById('liveCharCounter');
-const titleTooltip = document.getElementById('titleTooltip'); // Элемент для быстрого предпросмотра
+const titleTooltip = document.getElementById('titleTooltip'); 
 
 fileInput.addEventListener('change', handleFileSelect);
 downloadFileBtn.addEventListener('click', downloadUpdatedXLSX);
@@ -38,6 +38,85 @@ filterBtns.forEach(btn => {
         renderFullTable();
     });
 });
+
+// ==========================================
+// БЛОК РАБОТЫ С INDEXEDDB (АВТОСОХРАНЕНИЕ)
+// ==========================================
+const DB_NAME = 'YandexDirectAppDB';
+const DB_VERSION = 1;
+const STORE_NAME = 'AppState';
+
+function openDB() {
+    return new Promise((resolve, reject) => {
+        const request = indexedDB.open(DB_NAME, DB_VERSION);
+        request.onupgradeneeded = (e) => {
+            const db = e.target.result;
+            if (!db.objectStoreNames.contains(STORE_NAME)) {
+                db.createObjectStore(STORE_NAME);
+            }
+        };
+        request.onsuccess = (e) => resolve(e.target.result);
+        request.onerror = (e) => reject(e.target.error);
+    });
+}
+
+async function saveStateToDB() {
+    try {
+        const db = await openDB();
+        const tx = db.transaction(STORE_NAME, 'readwrite');
+        const store = tx.objectStore(STORE_NAME);
+        
+        const state = {
+            rawExcelRows,
+            originalHeaders,
+            processedDataset,
+            outputFileName,
+            headerRowGlobalIndex
+        };
+        
+        store.put(state, 'current_session');
+    } catch (err) {
+        console.error('Ошибка сохранения данных в IndexedDB:', err);
+    }
+}
+
+async function loadStateFromDB() {
+    try {
+        const db = await openDB();
+        const tx = db.transaction(STORE_NAME, 'readonly');
+        const store = tx.objectStore(STORE_NAME);
+        
+        return new Promise((resolve) => {
+            const request = store.get('current_session');
+            request.onsuccess = () => resolve(request.result || null);
+            request.onerror = () => resolve(null);
+        });
+    } catch (err) {
+        console.error('Ошибка загрузки данных из IndexedDB:', err);
+        return null;
+    }
+}
+
+// Инициализация при загрузке страницы
+document.addEventListener('DOMContentLoaded', async () => {
+    const savedState = await loadStateFromDB();
+    if (savedState && savedState.processedDataset && savedState.processedDataset.length > 0) {
+        rawExcelRows = savedState.rawExcelRows || [];
+        originalHeaders = savedState.originalHeaders || [];
+        processedDataset = savedState.processedDataset || [];
+        outputFileName = savedState.outputFileName || 'compiled_campaign.xlsx';
+        headerRowGlobalIndex = savedState.headerRowGlobalIndex !== undefined ? savedState.headerRowGlobalIndex : -1;
+        
+        uploadText.innerText = `Восстановлено: ${outputFileName}`;
+        downloadFileBtn.removeAttribute('disabled');
+        downloadFileBtn.className = "bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-3 px-5 rounded-xl transition-all flex items-center gap-2 shadow-md text-sm active:scale-98 cursor-pointer";
+        
+        updateDashboardStats();
+        buildTableHeader();
+        renderFullTable();
+    }
+});
+// ==========================================
 
 function handleFileSelect(event) {
     const file = event.target.files[0];
@@ -126,6 +205,7 @@ function analyzeStructureAndProcess() {
     updateDashboardStats();
     buildTableHeader();
     renderFullTable();
+    saveStateToDB(); // Сохраняем первичную загрузку
 }
 
 function computeRowMetrics(rowIndex, t1, t2, rowMap) {
@@ -136,7 +216,6 @@ function computeRowMetrics(rowIndex, t1, t2, rowMap) {
     let totalLength = t1.length;
     let overflow = 0;
 
-    // Если Заголовок 2 пустой — это отдельный успешный статус
     if (!cleanTitle2) {
         return {
             rowIndex: rowIndex,
@@ -264,7 +343,6 @@ function renderFullTable() {
 
     let displayData = [...processedDataset];
     
-    // Поддержка фильтрации
     if (currentFilter === 'has-t2') {
         displayData = displayData.filter(item => item.statusType !== 'no-t2');
     } else if (currentFilter !== 'all') {
@@ -506,6 +584,8 @@ function initInlineEditingEvents() {
 
             cell.innerHTML = formatTemplateText(newText);
             lucide.createIcons();
+            
+            saveStateToDB(); // Сохраняем изменения после каждого редактирования «на лету»
         });
 
         cell.addEventListener('keydown', function(e) {
