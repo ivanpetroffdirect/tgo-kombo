@@ -144,14 +144,7 @@ function handleFileSelect(event) {
             return;
         }
 
-        analyzeStructureAndProcess();
-        downloadFileBtn.removeAttribute('disabled');
-        downloadFileBtn.className = "bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-3 px-5 rounded-xl transition-all flex items-center gap-2 shadow-md text-sm active:scale-98 cursor-pointer";
-    };
-    reader.readAsArrayBuffer(file);
-}
-
-function analyzeStructureAndProcess() {
+        function analyzeStructureAndProcess() {
     let headerRowIndex = -1;
 
     for (let i = 0; i < Math.min(rawExcelRows.length, 30); i++) {
@@ -183,6 +176,9 @@ function analyzeStructureAndProcess() {
     }
 
     processedDataset = [];
+    
+    // Используем Set для отслеживания уже обработанных уникальных объявлений
+    const uniqueAdsKeys = new Set();
 
     for (let i = startDataRow; i < rawExcelRows.length; i++) {
         const row = rawExcelRows[i];
@@ -197,7 +193,24 @@ function analyzeStructureAndProcess() {
         if (!title1 || title1 === '-' || title1.startsWith('---')) continue; 
 
         const title2 = rowMap[t2HeaderName] || '';
+        const adText = rowMap[textHeaderName] || '';
+        const groupId = rowMap['ID группы'] || rowMap['ID группы объявления'] || '';
+        const adId = rowMap['ID объявления'] || '';
+
+        // Формируем уникальный составной ключ для объявления.
+        // Если есть ID объявления — берем его, если нет — связку Группа + Т1 + Т2 + Текст.
+        const adKey = adId 
+            ? `id_${adId}` 
+            : `fields_${groupId}_${title1}_${title2}_${adText}`;
+
+        // Если такое объявление уже встречалось, пропускаем его строку и не выводим в таблицу
+        if (uniqueAdsKeys.has(adKey)) {
+            continue;
+        }
         
+        // Запоминаем ключ, чтобы не пропустить дубликат далее
+        uniqueAdsKeys.add(adKey);
+
         const analyzedRow = computeRowMetrics(i, title1, title2, rowMap);
         processedDataset.push(analyzedRow);
     }
@@ -205,7 +218,7 @@ function analyzeStructureAndProcess() {
     updateDashboardStats();
     buildTableHeader();
     renderFullTable();
-    saveStateToDB(); // Сохраняем первичную загрузку
+    saveStateToDB(); // Сохраняем первичную загрузку без дубликатов
 }
 
 function computeRowMetrics(rowIndex, t1, t2, rowMap) {
