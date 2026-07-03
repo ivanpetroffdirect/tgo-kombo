@@ -1,6 +1,6 @@
 lucide.createIcons();
 
-let rawExcelRows = [];      // Исходная сырая матрица аоа для выгрузки
+let rawExcelRows = [];       // Исходная сырая матрица аоа для выгрузки
 let originalHeaders = [];    // Чистый массив заголовков
 let processedDataset = [];   // Наш структурированный массив объектов
 let currentFilter = 'all';
@@ -23,22 +23,17 @@ const downloadFileBtn = document.getElementById('downloadFileBtn');
 const searchInput = document.getElementById('tableSearch');
 const liveCounter = document.getElementById('liveCharCounter');
 
-if (fileInput) fileInput.addEventListener('change', handleFileSelect);
-if (downloadFileBtn) downloadFileBtn.addEventListener('click', downloadUpdatedXLSX);
-if (searchInput) {
-    searchInput.addEventListener('input', (e) => { 
-        searchQuery = e.target.value.toLowerCase().trim(); 
-        renderFullTable(); 
-    });
-}
+fileInput.addEventListener('change', handleFileSelect);
+downloadFileBtn.addEventListener('click', downloadUpdatedXLSX);
+searchInput.addEventListener('input', (e) => { searchQuery = e.target.value.toLowerCase().trim(); renderFullTable(); });
 
 filterBtns.forEach(btn => {
     btn.addEventListener('click', (e) => {
         filterBtns.forEach(b => b.classList.remove('bg-indigo-600', 'text-white', 'shadow-xs'));
         filterBtns.forEach(b => b.classList.add('bg-slate-100', 'text-slate-600', 'hover:bg-slate-200'));
-        e.currentTarget.classList.remove('bg-slate-100', 'text-slate-600', 'hover:bg-slate-200');
-        e.currentTarget.classList.add('bg-indigo-600', 'text-white', 'shadow-xs');
-        currentFilter = e.currentTarget.getAttribute('data-filter');
+        e.target.classList.remove('bg-slate-100', 'text-slate-600', 'hover:bg-slate-200');
+        e.target.classList.add('bg-indigo-600', 'text-white', 'shadow-xs');
+        currentFilter = e.target.getAttribute('data-filter');
         renderFullTable();
     });
 });
@@ -47,7 +42,7 @@ function handleFileSelect(event) {
     const file = event.target.files[0];
     if (!file) return;
 
-    if (uploadText) uploadText.innerText = file.name;
+    uploadText.innerText = file.name;
     
     let extension = '.xlsx';
     if (file.name.endsWith('.xls')) extension = '.xls';
@@ -58,11 +53,15 @@ function handleFileSelect(event) {
 
     const reader = new FileReader();
     reader.onload = function(e) {
+        const text = new TextDecoder('windows-1251').decode(e.target.result); // Пробуем декодировать
+        
+        // Если это CSV, пытаемся определить разделитель
         let workbook;
         if (file.name.endsWith('.csv')) {
-            const text = new TextDecoder('windows-1251').decode(e.target.result);
-            const firstLine = text.split('\n')[0] || '';
+            // Если в строке больше точек с запятой, чем запятых — считаем, что разделитель ';'
+            const firstLine = text.split('\n')[0];
             const fs = (firstLine.split(';').length > firstLine.split(',').length) ? ';' : ',';
+            
             workbook = XLSX.read(text, { type: 'string', FS: fs });
         } else {
             const data = new Uint8Array(e.target.result);
@@ -78,17 +77,10 @@ function handleFileSelect(event) {
         }
 
         analyzeStructureAndProcess();
-        if (downloadFileBtn) {
-            downloadFileBtn.removeAttribute('disabled');
-            downloadFileBtn.className = "bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-3 px-5 rounded-xl transition-all flex items-center gap-2 shadow-md text-sm active:scale-98 cursor-pointer";
-        }
+        downloadFileBtn.removeAttribute('disabled');
+        downloadFileBtn.className = "bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-3 px-5 rounded-xl transition-all flex items-center gap-2 shadow-md text-sm active:scale-98 cursor-pointer";
     };
-    
-    if (file.name.endsWith('.csv')) {
-        reader.readAsArrayBuffer(file);
-    } else {
-        reader.readAsArrayBuffer(file);
-    }
+    reader.readAsArrayBuffer(file);
 }
 
 function analyzeStructureAndProcess() {
@@ -110,7 +102,7 @@ function analyzeStructureAndProcess() {
     }
 
     if (headerRowIndex === -1) {
-        alert("Не удалось найти строку заголовков с полем 'Заголовок 1' и столбцами ID.");
+        alert("Не удалось найти строку заголовков с полем 'Заголовок 1'.");
         return;
     }
 
@@ -215,22 +207,14 @@ function updateDashboardStats() {
     const loss = processedDataset.filter(d => d.statusType === 'lost-utp').length;
     const pct = total > 0 ? Math.round((success / total) * 100) : 0;
 
-    const elTotal = document.getElementById('statTotal');
-    const elSuccess = document.getElementById('statSuccess');
-    const elSuccessPct = document.getElementById('statSuccessPct');
-    const elCut = document.getElementById('statCut');
-    const elLoss = document.getElementById('statLoss');
-
-    if (elTotal) elTotal.innerText = total;
-    if (elSuccess) elSuccess.innerText = success;
-    if (elSuccessPct) elSuccessPct.innerText = `${pct}% от всех объявлений`;
-    if (elCut) elCut.innerText = cut;
-    if (elLoss) elLoss.innerText = loss;
+    document.getElementById('statTotal').innerText = total;
+    document.getElementById('statSuccess').innerText = success;
+    document.getElementById('statSuccessPct').innerText = `${pct}% от всех объявлений`;
+    document.getElementById('statCut').innerText = cut;
+    document.getElementById('statLoss').innerText = loss;
 }
 
 function buildTableHeader() {
-    if (!tableHeaderRow) return;
-    
     let html = `
         <th id="sortStatusBtn" class="py-4 px-4 bg-slate-100 text-slate-700 sticky left-0 z-30 border-r border-slate-200 shadow-[2px_0_5px_rgba(0,0,0,0.03)] min-w-[150px] cursor-pointer hover:bg-slate-200 transition-colors select-none">
             <div class="flex items-center gap-1.5">
@@ -247,9 +231,7 @@ function buildTableHeader() {
     });
 
     tableHeaderRow.innerHTML = html;
-    
-    const sortBtn = document.getElementById('sortStatusBtn');
-    if (sortBtn) sortBtn.addEventListener('click', toggleSort);
+    document.getElementById('sortStatusBtn').addEventListener('click', toggleSort);
     updateSortIndicator();
 }
 
@@ -276,7 +258,6 @@ function formatTemplateText(text) {
 }
 
 function renderFullTable() {
-    if (!tableBody) return;
     tableBody.innerHTML = '';
 
     let displayData = [...processedDataset];
@@ -296,8 +277,7 @@ function renderFullTable() {
     if (sortDirection === 'asc') displayData.sort((a, b) => a.statusWeight - b.statusWeight);
     else if (sortDirection === 'desc') displayData.sort((a, b) => b.statusWeight - a.statusWeight);
 
-    const counterEl = document.getElementById('tableCounter');
-    if (counterEl) counterEl.innerText = `Строк: ${displayData.length}`;
+    document.getElementById('tableCounter').innerText = `Строк: ${displayData.length}`;
 
     if (displayData.length === 0) {
         tableBody.innerHTML = `<tr><td colspan="${originalHeaders.length + 4}" class="py-12 text-center text-slate-400">Ничего не найдено.</td></tr>`;
@@ -330,10 +310,10 @@ function renderFullTable() {
         if (rowBgClass) tr.className = rowBgClass;
 
         let rowHtml = `
-            <td class="p-3 sticky-col sticky left-0 z-10 border-r border-slate-200 shadow-[2px_0_5px_rgba(0,0,0,0.02)] cell-status">${statusBadge}</td>
-            <td class="p-3 sticky-col sticky left-[150px] z-10 border-r border-slate-200 shadow-[2px_0_5px_rgba(0,0,0,0.02)] font-medium text-slate-900 max-w-[200px] truncate cell-combined" title="${item.combined}">${formatTemplateText(item.combined)}</td>
-            <td class="p-3 sticky-col sticky left-[350px] z-10 border-r border-slate-200 text-center font-mono font-bold cell-overflow ${item.overflow > 0 ? 'text-rose-600' : 'text-slate-300'}">${item.overflow > 0 ? `+${item.overflow}` : '0'}</td>
-            <td class="p-3 sticky-col sticky left-[460px] z-10 border-r border-slate-300 shadow-[3px_0_5px_rgba(0,0,0,0.04)] cell-issue">${issueText}</td>
+            <td class="p-3 sticky-col sticky left-0 z-10 border-r border-slate-200 shadow-[2px_0_5px_rgba(0,0,0,0.02)]">${statusBadge}</td>
+            <td class="p-3 sticky-col sticky left-[150px] z-10 border-r border-slate-200 shadow-[2px_0_5px_rgba(0,0,0,0.02)] font-medium text-slate-900 max-w-[200px] truncate" title="${item.combined}">${formatTemplateText(item.combined)}</td>
+            <td class="p-3 sticky-col sticky left-[350px] z-10 border-r border-slate-200 text-center font-mono font-bold ${item.overflow > 0 ? 'text-rose-600' : 'text-slate-300'}">${item.overflow > 0 ? `+${item.overflow}` : '0'}</td>
+            <td class="p-3 sticky-col sticky left-[460px] z-10 border-r border-slate-300 shadow-[3px_0_5px_rgba(0,0,0,0.04)]">${issueText}</td>
         `;
 
         originalHeaders.forEach((headerName, curIdx) => {
@@ -384,65 +364,51 @@ function initInlineEditingEvents() {
     const cells = tableBody.querySelectorAll('.editable-cell');
     cells.forEach(cell => {
         
-        cell.addEventListener('input', function() {
+        cell.addEventListener('input', function(e) {
             const editType = cell.getAttribute('data-type');
             const text = cell.innerText;
             const len = text.length;
 
-            if (liveCounter) {
-                const rect = cell.getBoundingClientRect();
-                liveCounter.style.left = `${rect.left + window.scrollX}px`;
-                liveCounter.style.top = `${rect.top + window.scrollY - 28}px`;
-                liveCounter.innerText = `Длина: ${len} симв.`;
-                
-                if (editType === 't1' && len > 56) {
-                    liveCounter.className = "fixed z-50 bg-rose-600 text-white px-2.5 py-1 text-xs font-mono rounded-md shadow-lg pointer-events-none font-bold";
-                } else {
-                    liveCounter.className = "fixed z-50 bg-slate-900 text-white px-2.5 py-1 text-xs font-mono rounded-md shadow-lg pointer-events-none font-bold";
-                }
+            const rect = cell.getBoundingClientRect();
+            liveCounter.style.left = `${rect.left + window.scrollX}px`;
+            liveCounter.style.top = `${rect.top + window.scrollY - 28}px`;
+            liveCounter.innerText = `Длина: ${len} симв.`;
+            
+            if (editType === 't1' && len > 56) {
+                liveCounter.className = "fixed z-50 bg-rose-600 text-white px-2.5 py-1 text-xs font-mono rounded-md shadow-lg pointer-events-none font-bold";
+            } else {
+                liveCounter.className = "fixed z-50 bg-slate-900 text-white px-2.5 py-1 text-xs font-mono rounded-md shadow-lg pointer-events-none font-bold";
             }
 
             const tr = cell.closest('tr');
-            if (tr) {
-                if (editType === 't1') {
-                    const lenT1Cell = tr.querySelector('td[data-len-type="t1"]');
-                    if (lenT1Cell) lenT1Cell.innerText = len;
-                } else if (editType === 't2') {
-                    const lenT2Cell = tr.querySelector('td[data-len-type="text2"]');
-                    if (lenT2Cell) lenT2Cell.innerText = len;
-                }
+            if (editType === 't1') {
+                const lenT1Cell = tr.querySelector('td[data-len-type="t1"]');
+                if (lenT1Cell) lenT1Cell.innerText = len;
+            } else if (editType === 't2') {
+                const lenT2Cell = tr.querySelector('td[data-len-type="text2"]');
+                if (lenT2Cell) lenT2Cell.innerText = len;
             }
         });
 
-        cell.addEventListener('focus', function() {
-            const tr = cell.closest('tr');
-            if (!tr) return;
-            const rowIndex = parseInt(tr.getAttribute('data-row-index'));
+        cell.addEventListener('focus', function(e) {
+            const rowIndex = parseInt(cell.closest('tr').getAttribute('data-row-index'));
             const editType = cell.getAttribute('data-type');
             const dataItem = processedDataset.find(item => item.rowIndex === rowIndex);
-            
             if (dataItem) {
-                // Возвращаем чистый исходный текст во время редактирования (без HTML тегов)
-                const plainText = editType === 't1' ? dataItem.t1 : dataItem.t2;
-                if (cell.innerText !== plainText) {
-                    cell.innerText = plainText;
-                }
+                cell.innerText = editType === 't1' ? dataItem.t1 : dataItem.t2;
             }
 
-            if (liveCounter) {
-                liveCounter.innerText = `Длина: ${cell.innerText.length} симв.`;
-                const rect = cell.getBoundingClientRect();
-                liveCounter.style.left = `${rect.left + window.scrollX}px`;
-                liveCounter.style.top = `${rect.top + window.scrollY - 28}px`;
-                liveCounter.classList.remove('hidden');
-            }
+            liveCounter.innerText = `Длина: ${cell.innerText.length} симв.`;
+            const rect = cell.getBoundingClientRect();
+            liveCounter.style.left = `${rect.left + window.scrollX}px`;
+            liveCounter.style.top = `${rect.top + window.scrollY - 28}px`;
+            liveCounter.classList.remove('hidden');
         });
 
-        cell.addEventListener('blur', function() {
-            if (liveCounter) liveCounter.classList.add('hidden');
+        cell.addEventListener('blur', function(e) {
+            liveCounter.classList.add('hidden');
             
             const tr = cell.closest('tr');
-            if (!tr) return;
             const rowIndex = parseInt(tr.getAttribute('data-row-index'));
             const editType = cell.getAttribute('data-type');
             const newText = cell.innerText.trim();
@@ -463,20 +429,16 @@ function initInlineEditingEvents() {
 
             updateDashboardStats();
             
-            const combinedCell = tr.querySelector('.cell-combined');
-            const overflowCell = tr.querySelector('.cell-overflow');
-            const issueCell = tr.querySelector('.cell-issue');
-            const statusCell = tr.querySelector('.cell-status');
+            const combinedCell = tr.querySelector('td:nth-child(2)');
+            const overflowCell = tr.querySelector('td:nth-child(3)');
+            const issueCell = tr.querySelector('td:nth-child(4)');
+            const statusCell = tr.querySelector('td:nth-child(1)');
 
-            if (combinedCell) {
-                combinedCell.innerHTML = formatTemplateText(dataItem.combined);
-                combinedCell.setAttribute('title', dataItem.combined);
-            }
+            combinedCell.innerHTML = formatTemplateText(dataItem.combined);
+            combinedCell.setAttribute('title', dataItem.combined);
             
-            if (overflowCell) {
-                overflowCell.innerText = dataItem.overflow > 0 ? `+${dataItem.overflow}` : '0';
-                overflowCell.className = `p-3 sticky-col sticky left-[350px] z-10 border-r border-slate-200 text-center font-mono font-bold cell-overflow ${dataItem.overflow > 0 ? 'text-rose-600' : 'text-slate-300'}`;
-            }
+            overflowCell.innerText = dataItem.overflow > 0 ? `+${dataItem.overflow}` : '0';
+            overflowCell.className = `p-3 sticky-col sticky left-[350px] z-10 border-r border-slate-200 text-center font-mono font-bold ${dataItem.overflow > 0 ? 'text-rose-600' : 'text-slate-300'}`;
 
             const lenT1Cell = tr.querySelector('td[data-len-type="t1"]');
             if (lenT1Cell) lenT1Cell.innerText = dataItem.t1.length;
@@ -484,20 +446,18 @@ function initInlineEditingEvents() {
             const lenT2Cell = tr.querySelector('td[data-len-type="text2"]');
             if (lenT2Cell) lenT2Cell.innerText = dataItem.t2.length;
 
-            if (statusCell && issueCell) {
-                if (dataItem.statusType === 'lost-utp') {
-                    statusCell.innerHTML = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-bold bg-rose-50 text-rose-700 border border-rose-200"><i data-lucide="alert-circle" class="w-3 h-3"></i> Доп. заголовок будет отброшен</span>`;
-                    issueCell.innerHTML = `<span class="text-rose-600 font-semibold text-xs">Теряет УТП: ${dataItem.utpReasons.join(', ')}</span>`;
-                    tr.className = "bg-rose-50/10 hover:bg-rose-50/20 transition-colors group";
-                } else if (dataItem.statusType === 'lost-safe') {
-                    statusCell.innerHTML = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200"><i data-lucide="scissors" class="w-3 h-3"></i> Срез доп. заг-ка</span>`;
-                    issueCell.innerHTML = '—';
-                    tr.className = "bg-amber-50/5 hover:bg-amber-50/15 transition-colors group";
-                } else {
-                    statusCell.innerHTML = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200"><i data-lucide="check" class="w-3 h-3"></i> Перенесется</span>`;
-                    issueCell.innerHTML = '—';
-                    tr.className = "hover:bg-slate-50/80 transition-colors group";
-                }
+            if (dataItem.statusType === 'lost-utp') {
+                statusCell.innerHTML = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-bold bg-rose-50 text-rose-700 border border-rose-200"><i data-lucide="alert-circle" class="w-3 h-3"></i> Доп. заголовок будет отброшен</span>`;
+                issueCell.innerHTML = `<span class="text-rose-600 font-semibold text-xs">Теряет УТП: ${dataItem.utpReasons.join(', ')}</span>`;
+                tr.className = "bg-rose-50/10 hover:bg-rose-50/20 transition-colors group";
+            } else if (dataItem.statusType === 'lost-safe') {
+                statusCell.innerHTML = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200"><i data-lucide="scissors" class="w-3 h-3"></i> Срез доп. заг-ка</span>`;
+                issueCell.innerHTML = '—';
+                tr.className = "bg-amber-50/5 hover:bg-amber-50/15 transition-colors group";
+            } else {
+                statusCell.innerHTML = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200"><i data-lucide="check" class="w-3 h-3"></i> Перенесется</span>`;
+                issueCell.innerHTML = '—';
+                tr.className = "hover:bg-slate-50/80 transition-colors group";
             }
 
             cell.innerHTML = formatTemplateText(newText);
@@ -519,7 +479,7 @@ function downloadUpdatedXLSX() {
     const exportRows = [];
     
     for (let i = 0; i <= headerRowGlobalIndex; i++) {
-        if (rawExcelRows[i]) exportRows.push(rawExcelRows[i]);
+        exportRows.push(rawExcelRows[i]);
     }
 
     const textColIdx = originalHeaders.indexOf(textHeaderName);
@@ -548,11 +508,12 @@ function downloadUpdatedXLSX() {
     const wb = XLSX.utils.book_new();
     const ws = XLSX.utils.aoa_to_sheet(exportRows);
     
-    XLSX.utils.book_append_sheet(wb, ws, "Кампания");
-    
+    // Поддержка экспорта в зависимости от формата исходного файла
     if (outputFileName.endsWith('.csv')) {
+        XLSX.utils.book_append_sheet(wb, ws, "Кампания");
         XLSX.writeFile(wb, outputFileName, { bookType: 'csv', FS: ';' }); 
     } else {
+        XLSX.utils.book_append_sheet(wb, ws, "Кампания");
         XLSX.writeFile(wb, outputFileName);
     }
 }
