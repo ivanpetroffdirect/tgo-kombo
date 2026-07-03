@@ -484,7 +484,8 @@ function initInlineEditingEvents() {
         
         cell.addEventListener('input', function(e) {
             const editType = cell.getAttribute('data-type');
-            const text = cell.innerText;
+            // Используем textContent для получения чистого текста без учета HTML-тегов
+            const text = cell.textContent;
             const len = text.length;
 
             const rect = cell.getBoundingClientRect();
@@ -512,11 +513,13 @@ function initInlineEditingEvents() {
             const rowIndex = parseInt(cell.closest('tr').getAttribute('data-row-index'));
             const editType = cell.getAttribute('data-type');
             const dataItem = processedDataset.find(item => item.rowIndex === rowIndex);
+            
             if (dataItem) {
-                cell.innerText = editType === 't1' ? dataItem.t1 : dataItem.t2;
+                // Всегда берем строго чистые данные из массива, заменяя HTML на чистый текст
+                cell.textContent = editType === 't1' ? dataItem.t1 : dataItem.t2;
             }
 
-            liveCounter.innerText = `Длина: ${cell.innerText.length} симв.`;
+            liveCounter.innerText = `Длина: ${cell.textContent.length} симв.`;
             const rect = cell.getBoundingClientRect();
             liveCounter.style.left = `${rect.left + window.scrollX}px`;
             liveCounter.style.top = `${rect.top + window.scrollY - 28}px`;
@@ -529,7 +532,8 @@ function initInlineEditingEvents() {
             const tr = cell.closest('tr');
             const rowIndex = parseInt(tr.getAttribute('data-row-index'));
             const editType = cell.getAttribute('data-type');
-            const newText = cell.innerText.trim();
+            // Читаем чистый измененный текст через textContent
+            const newText = cell.textContent.trim();
 
             const dataItem = processedDataset.find(item => item.rowIndex === rowIndex);
             if (!dataItem) return;
@@ -582,10 +586,14 @@ function initInlineEditingEvents() {
                 tr.className = "hover:bg-slate-50/80 transition-colors group";
             }
 
+            // Обновляем тайтл у самой ячейки для всплывающей подсказки браузера
+            cell.setAttribute('title', 'Кликните для редактирования');
+            
+            // Безопасно рендерим подсветку шаблонов обратно
             cell.innerHTML = formatTemplateText(newText);
             lucide.createIcons();
             
-            saveStateToDB(); // Сохраняем изменения после каждого редактирования «на лету»
+            saveStateToDB(); // Сохраняем сессию в IndexedDB
         });
 
         cell.addEventListener('keydown', function(e) {
