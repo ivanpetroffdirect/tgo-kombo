@@ -88,7 +88,9 @@ function analyzeStructureAndProcess() {
         if (foundT1 !== -1 && hasIdCol) {
             headerRowIndex = i;
             headerRowGlobalIndex = i;
-            originalHeaders = rowStr;
+            
+            // Фильтруем заголовки: полностью исключаем столбцы "Комбинаторика" из отрисовки
+            originalHeaders = rowStr.filter(header => !header.toLowerCase().includes('комбинаторика'));
             break;
         }
     }
@@ -106,8 +108,9 @@ function analyzeStructureAndProcess() {
         }
     }
 
-    // Находим индекс столбца "Тип объявления"
-    const typeHeaderIdx = originalHeaders.findIndex(h => h.toLowerCase().trim() === 'тип объявления');
+    // Ищем индекс столбца "Тип объявления" в исходном (полном) массиве строки заголовков
+    const fullHeaderRow = rawExcelRows[headerRowIndex].map(cell => String(cell || '').trim().toLowerCase());
+    const typeHeaderIdx = fullHeaderRow.indexOf('тип объявления');
 
     processedDataset = [];
 
@@ -115,18 +118,24 @@ function analyzeStructureAndProcess() {
         const row = rawExcelRows[i];
         if (!row || row.length === 0) continue;
 
-        // Если столбец "Тип объявления" найден, проверяем его значение
+        // Строгая фильтрация строк по типу объявления
         if (typeHeaderIdx !== -1) {
             const adType = row[typeHeaderIdx] !== undefined ? String(row[typeHeaderIdx]).trim() : '';
-            // Пропускаем строку, если это НЕ текстово-графическое объявление
             if (adType && adType.toLowerCase() !== 'текстово-графическое') {
                 continue; 
             }
         }
 
         const rowMap = {};
-        originalHeaders.forEach((header, colIdx) => {
-            rowMap[header] = row[colIdx] !== undefined ? String(row[colIdx]).trim() : '';
+        // Собираем данные только для тех столбцов, которые прошли фильтрацию
+        originalHeaders.forEach(header => {
+            // Ищем индекс заголовка в исходной полной строке файла, чтобы не сместить данные
+            const originalColIdx = fullHeaderRow.indexOf(header.toLowerCase());
+            if (originalColIdx !== -1) {
+                rowMap[header] = row[originalColIdx] !== undefined ? String(row[originalColIdx]).trim() : '';
+            } else {
+                rowMap[header] = '';
+            }
         });
 
         const title1 = rowMap[t1HeaderName] || '';
