@@ -88,9 +88,7 @@ function analyzeStructureAndProcess() {
         if (foundT1 !== -1 && hasIdCol) {
             headerRowIndex = i;
             headerRowGlobalIndex = i;
-            
-            // Фильтруем заголовки: полностью исключаем столбцы "Комбинаторика" из отрисовки
-            originalHeaders = rowStr.filter(header => !header.toLowerCase().includes('комбинаторика'));
+            originalHeaders = rowStr;
             break;
         }
     }
@@ -108,34 +106,15 @@ function analyzeStructureAndProcess() {
         }
     }
 
-    // Ищем индекс столбца "Тип объявления" в исходном (полном) массиве строки заголовков
-    const fullHeaderRow = rawExcelRows[headerRowIndex].map(cell => String(cell || '').trim().toLowerCase());
-    const typeHeaderIdx = fullHeaderRow.indexOf('тип объявления');
-
     processedDataset = [];
 
     for (let i = startDataRow; i < rawExcelRows.length; i++) {
         const row = rawExcelRows[i];
         if (!row || row.length === 0) continue;
 
-        // Строгая фильтрация строк по типу объявления
-        if (typeHeaderIdx !== -1) {
-            const adType = row[typeHeaderIdx] !== undefined ? String(row[typeHeaderIdx]).trim() : '';
-            if (adType && adType.toLowerCase() !== 'текстово-графическое') {
-                continue; 
-            }
-        }
-
         const rowMap = {};
-        // Собираем данные только для тех столбцов, которые прошли фильтрацию
-        originalHeaders.forEach(header => {
-            // Ищем индекс заголовка в исходной полной строке файла, чтобы не сместить данные
-            const originalColIdx = fullHeaderRow.indexOf(header.toLowerCase());
-            if (originalColIdx !== -1) {
-                rowMap[header] = row[originalColIdx] !== undefined ? String(row[originalColIdx]).trim() : '';
-            } else {
-                rowMap[header] = '';
-            }
+        originalHeaders.forEach((header, colIdx) => {
+            rowMap[header] = row[colIdx] !== undefined ? String(row[colIdx]).trim() : '';
         });
 
         const title1 = rowMap[t1HeaderName] || '';
