@@ -104,7 +104,6 @@ function analyzeStructureAndProcess() {
     }
 
     processedDataset = [];
-    const uniqueAds = new Set(); // Хранилище уникальных ключей объявлений для исключения дублей
 
     for (let i = startDataRow; i < rawExcelRows.length; i++) {
         const row = rawExcelRows[i];
@@ -119,12 +118,6 @@ function analyzeStructureAndProcess() {
         if (!title1 || title1 === '-' || title1.startsWith('---')) continue; 
 
         const title2 = rowMap[t2HeaderName] || '';
-        const adText = rowMap[textHeaderName] || '';
-        
-        // Создаем уникальный ключ объявления на основе Заголовка 1, Заголовка 2 и Текста
-        const adKey = `${title1.toLowerCase()}|||${title2.toLowerCase()}|||${adText.toLowerCase()}`;
-        if (uniqueAds.has(adKey)) continue; // Если дубль обнаружен, пропускаем строку
-        uniqueAds.add(adKey);
         
         const analyzedRow = computeRowMetrics(i, title1, title2, rowMap);
         processedDataset.push(analyzedRow);
