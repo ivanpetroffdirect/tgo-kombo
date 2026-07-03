@@ -1,17 +1,18 @@
 lucide.createIcons();
 
-let rawExcelRows = [];    // Исходная сырая матрица аоа для выгрузки
-let originalHeaders = [];    // Чистый массив заголовков
-let processedDataset = [];   // Наш структурированный массив объектов
+let rawExcelRows = [];        // Исходная сырая матрица xlsx
+let originalHeaders = [];     // Внутренние уникализированные заголовочные ключи
+let processedDataset = [];    // Чистые ТГО объявления для интерфейса
 let currentFilter = 'all';
 let searchQuery = '';
 let sortDirection = 'none'; 
 let outputFileName = 'compiled_campaign.xlsx';
 
-// Хранилище связей индексов
-let t1HeaderName = 'Заголовок 1';
-let t2HeaderName = 'Заголовок 2';
-let textHeaderName = 'Текст';
+// Базовые константы имен полей Директа
+const t1HeaderName = 'Заголовок 1';
+const t2HeaderName = 'Заголовок 2';
+const textHeaderName = 'Текст';
+const idAdHeaderName = 'ID объявления'; 
 let headerRowGlobalIndex = -1;
 
 const fileInput = document.getElementById('excelFile');
@@ -38,85 +39,6 @@ filterBtns.forEach(btn => {
         renderFullTable();
     });
 });
-
-// ==========================================
-// БЛОК РАБОТЫ С INDEXEDDB (АВТОСОХРАНЕНИЕ)
-// ==========================================
-const DB_NAME = 'YandexDirectAppDB';
-const DB_VERSION = 1;
-const STORE_NAME = 'AppState';
-
-function openDB() {
-    return new Promise((resolve, reject) => {
-        const request = indexedDB.open(DB_NAME, DB_VERSION);
-        request.onupgradeneeded = (e) => {
-            const db = e.target.result;
-            if (!db.objectStoreNames.contains(STORE_NAME)) {
-                db.createObjectStore(STORE_NAME);
-            }
-        };
-        request.onsuccess = (e) => resolve(e.target.result);
-        request.onerror = (e) => reject(e.target.error);
-    });
-}
-
-async function saveStateToDB() {
-    try {
-        const db = await openDB();
-        const tx = db.transaction(STORE_NAME, 'readwrite');
-        const store = tx.objectStore(STORE_NAME);
-        
-        const state = {
-            rawExcelRows,
-            originalHeaders,
-            processedDataset,
-            outputFileName,
-            headerRowGlobalIndex
-        };
-        
-        store.put(state, 'current_session');
-    } catch (err) {
-        console.error('Ошибка сохранения данных в IndexedDB:', err);
-    }
-}
-
-async function loadStateFromDB() {
-    try {
-        const db = await openDB();
-        const tx = db.transaction(STORE_NAME, 'readonly');
-        const store = tx.objectStore(STORE_NAME);
-        
-        return new Promise((resolve) => {
-            const request = store.get('current_session');
-            request.onsuccess = () => resolve(request.result || null);
-            request.onerror = () => resolve(null);
-        });
-    } catch (err) {
-        console.error('Ошибка загрузки данных из IndexedDB:', err);
-        return null;
-    }
-}
-
-// Инициализация при загрузке страницы
-document.addEventListener('DOMContentLoaded', async () => {
-    const savedState = await loadStateFromDB();
-    if (savedState && savedState.processedDataset && savedState.processedDataset.length > 0) {
-        rawExcelRows = savedState.rawExcelRows || [];
-        originalHeaders = savedState.originalHeaders || [];
-        processedDataset = savedState.processedDataset || [];
-        outputFileName = savedState.outputFileName || 'compiled_campaign.xlsx';
-        headerRowGlobalIndex = savedState.headerRowGlobalIndex !== undefined ? savedState.headerRowGlobalIndex : -1;
-        
-        uploadText.innerText = `Восстановлено: ${outputFileName}`;
-        downloadFileBtn.removeAttribute('disabled');
-        downloadFileBtn.className = "bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-3 px-5 rounded-xl transition-all flex items-center gap-2 shadow-md text-sm active:scale-98 cursor-pointer";
-        
-        updateDashboardStats();
-        buildTableHeader();
-        renderFullTable();
-    }
-});
-// ==========================================
 
 function handleFileSelect(event) {
     const file = event.target.files[0];
@@ -164,13 +86,26 @@ function analyzeStructureAndProcess() {
         if (foundT1 !== -1 && hasIdCol) {
             headerRowIndex = i;
             headerRowGlobalIndex = i;
-            originalHeaders = rowStr;
+            
+            // Защита от дубликатов заголовков (ТГО vs Комбинаторика)
+            const seenHeaders = {};
+            originalHeaders = rowStr.map((header) => {
+                const hName = header || '';
+                if (!hName) return '';
+                if (seenHeaders[hName] !== undefined) {
+                    seenHeaders[hName]++;
+                    return `${hName}_dup${seenHeaders[hName]}`; 
+                } else {
+                    seenHeaders[hName] = 0;
+                    return hName;
+                }
+            });
             break;
         }
     }
 
     if (headerRowIndex === -1) {
-        alert("Не удалось найти строку заголовков с полем 'Заголовок 1'.");
+        alert("Не удалось найти строку заголовков.");
         return;
     }
 
@@ -183,6 +118,7 @@ function analyzeStructureAndProcess() {
     }
 
     processedDataset = [];
+    const seenAdsKeys = new Set();
 
     for (let i = startDataRow; i < rawExcelRows.length; i++) {
         const row = rawExcelRows[i];
@@ -193,32 +129,57 @@ function analyzeStructureAndProcess() {
             rowMap[header] = row[colIdx] !== undefined ? String(row[colIdx]).trim() : '';
         });
 
+        const adId = rowMap[idAdHeaderName] || '';
         const title1 = rowMap[t1HeaderName] || '';
-        if (!title1 || title1 === '-' || title1.startsWith('---')) continue; 
-
         const title2 = rowMap[t2HeaderName] || '';
+
+        // Пропускаем комбинаторику в интерфейсе (у нее пустой ТГО Заголовок 1)
+        const isPureCombinatorics = !title1 && rowMap[`${t1HeaderName}_dup1`];
+        if (isPureCombinatorics) {
+            continue; 
+        }
+
+        // Уникальный ключ на базе контента ТГО
+        const uniqueKey = adId ? `id_${adId}_t1_${title1}_t2_${title2}` : `t1_${title1}_t2_${title2}`;
+
+        if (seenAdsKeys.has(uniqueKey)) {
+            continue;
+        }
+        seenAdsKeys.add(uniqueKey);
         
-        const analyzedRow = computeRowMetrics(i, title1, title2, rowMap);
+        const analyzedRow = computeRowMetrics(i, title1, title2, rowMap, uniqueKey);
         processedDataset.push(analyzedRow);
     }
 
     updateDashboardStats();
     buildTableHeader();
     renderFullTable();
-    saveStateToDB(); // Сохраняем первичную загрузку
 }
 
-function computeRowMetrics(rowIndex, t1, t2, rowMap) {
+function computeRowMetrics(rowIndex, t1, t2, rowMap, uniqueKey) {
     const cleanTitle2 = (t2 === '-' || t2 === '0') ? '' : t2;
 
-    let combinedTitle = t1;
-    let isMerged = false;
-    let totalLength = t1.length;
-    let overflow = 0;
+    if (!t1 || t1 === '-' || t1.startsWith('---')) {
+        return {
+            rowIndex: rowIndex,
+            uniqueKey: uniqueKey,
+            t1: t1,
+            t2: cleanTitle2,
+            combined: t1 || '—',
+            isMerged: true,
+            length: (t1 || '').length,
+            overflow: 0,
+            statusType: 'other-type',
+            statusWeight: 5, 
+            utpReasons: [],
+            rowMap: rowMap 
+        };
+    }
 
     if (!cleanTitle2) {
         return {
             rowIndex: rowIndex,
+            uniqueKey: uniqueKey,
             t1: t1,
             t2: '',
             combined: t1,
@@ -233,6 +194,11 @@ function computeRowMetrics(rowIndex, t1, t2, rowMap) {
     }
 
     const potential = t1 + ". " + cleanTitle2;
+    let combinedTitle = t1;
+    let isMerged = false;
+    let totalLength = t1.length;
+    let overflow = 0;
+
     if (potential.length <= 56) {
         combinedTitle = potential;
         isMerged = true;
@@ -257,6 +223,7 @@ function computeRowMetrics(rowIndex, t1, t2, rowMap) {
 
     return {
         rowIndex: rowIndex,
+        uniqueKey: uniqueKey,
         t1: t1,
         t2: cleanTitle2,
         combined: combinedTitle,
@@ -290,7 +257,7 @@ function updateDashboardStats() {
 
     document.getElementById('statTotal').innerText = total;
     document.getElementById('statSuccess').innerText = success;
-    document.getElementById('statSuccessPct').innerText = `${pct}% от всех объявлений`;
+    document.getElementById('statSuccessPct').innerText = `${pct}% от всех ТГО`;
     document.getElementById('statCut').innerText = cut;
     document.getElementById('statLoss').innerText = loss;
 }
@@ -303,12 +270,12 @@ function buildTableHeader() {
             </div>
         </th>
         <th class="py-4 px-4 bg-slate-100 text-slate-700 sticky left-[150px] z-30 border-r border-slate-200 min-w-[200px]">Итоговый заголовок</th>
-        <th class="py-4 px-4 bg-slate-100 text-slate-700 sticky left-[350px] z-30 border-r border-slate-200 text-center min-w-[110px]">Превышение</th>
-        <th class="py-4 px-4 bg-slate-100 text-slate-700 sticky left-[460px] z-30 border-r border-slate-300 shadow-[3px_0_5px_rgba(0,0,0,0.05)] min-w-[150px]">Проблемы</th>
+        <th class="py-4 px-4 bg-slate-100 text-slate-700 sticky left-[350px] z-30 border-r border-slate-300 text-center min-w-[110px] shadow-[3px_0_5px_rgba(0,0,0,0.04)]">Превышение</th>
     `;
 
     originalHeaders.forEach(header => {
-        html += `<th class="py-4 px-4 border-b border-slate-200 text-slate-600 font-semibold">${header || ''}</th>`;
+        const cleanDisplayName = String(header || '').split('_dup')[0];
+        html += `<th class="py-4 px-4 border-b border-slate-200 text-slate-600 font-semibold text-xs whitespace-nowrap">${cleanDisplayName}</th>`;
     });
 
     tableHeaderRow.innerHTML = html;
@@ -360,67 +327,69 @@ function renderFullTable() {
     if (sortDirection === 'asc') displayData.sort((a, b) => a.statusWeight - b.statusWeight);
     else if (sortDirection === 'desc') displayData.sort((a, b) => b.statusWeight - a.statusWeight);
 
-    document.getElementById('tableCounter').innerText = `Строк: ${displayData.length}`;
+    document.getElementById('tableCounter').innerText = `Показано объявлений: ${displayData.length}`;
 
     if (displayData.length === 0) {
-        tableBody.innerHTML = `<tr><td colspan="${originalHeaders.length + 4}" class="py-12 text-center text-slate-400">Ничего не найдено.</td></tr>`;
+        tableBody.innerHTML = `<tr><td colspan="${originalHeaders.length + 3}" class="py-12 text-center text-slate-400">Ничего не найдено.</td></tr>`;
         return;
     }
 
-    const textColIdx = originalHeaders.indexOf(textHeaderName);
-    const lenIndices = (textColIdx !== -1) ? [textColIdx + 1, textColIdx + 2, textColIdx + 3] : [];
+    // Ищем индексы столбцов "Длина..." относящиеся к ТГО
+    const lenIndices = [];
+    originalHeaders.forEach((headerName, idx) => {
+        const hLower = headerName.toLowerCase();
+        if (hLower.includes('длина') && !hLower.includes('_dup') && (hLower.includes('заголовок') || hLower.includes('текст'))) {
+            lenIndices.push(idx);
+        }
+    });
 
     displayData.forEach(item => {
         const tr = document.createElement('tr');
-        tr.className = "hover:bg-slate-50/80 transition-colors group";
-        tr.setAttribute('data-row-index', item.rowIndex);
+        tr.className = "hover:bg-slate-50/80 transition-colors group bg-white";
+        tr.setAttribute('data-unique-key', item.uniqueKey);
 
         let statusBadge = '';
         let rowBgClass = '';
-        let issueText = '—';
 
         if (item.statusType === 'no-t2') {
-            statusBadge = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200"><i data-lucide="minus-circle" class="w-3 h-3"></i> Нет доп. заголовка</span>`;
-            rowBgClass = 'hover:bg-slate-50/80';
+            statusBadge = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200"><i data-lucide="minus-circle" class="w-3 h-3"></i> Нет доп. заг.</span>`;
         } else if (item.statusType === 'lost-utp') {
-            statusBadge = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-bold bg-rose-50 text-rose-700 border border-rose-200"><i data-lucide="alert-circle" class="w-3 h-3"></i> Доп. заголовок будет отброшен</span>`;
+            statusBadge = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-bold bg-rose-50 text-rose-700 border border-rose-200" title="Теряет УТП: ${item.utpReasons.join(', ')}"><i data-lucide="alert-circle" class="w-3 h-3"></i> Теряет УТП</span>`;
             rowBgClass = 'bg-rose-50/10 hover:bg-rose-50/20';
-            issueText = `<span class="text-rose-600 font-semibold text-xs">Теряет УТП: ${item.utpReasons.join(', ')}</span>`;
         } else if (item.statusType === 'lost-safe') {
-            statusBadge = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200"><i data-lucide="scissors" class="w-3 h-3"></i> Срез доп. заг-ка</span>`;
+            statusBadge = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200"><i data-lucide="scissors" class="w-3 h-3"></i> Срез доп. заг.</span>`;
             rowBgClass = 'bg-amber-50/5 hover:bg-amber-50/15';
         } else {
-            statusBadge = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200"><i data-lucide="check" class="w-3 h-3"></i> Перенесется</span>`;
+            statusBadge = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200"><i data-lucide="check" class="w-3 h-3"></i> Склеится</span>`;
         }
 
         if (rowBgClass) tr.className = rowBgClass + " transition-colors group";
 
         let rowHtml = `
-            <td class="p-3 sticky-col sticky left-0 z-10 border-r border-slate-200 shadow-[2px_0_5px_rgba(0,0,0,0.02)]">${statusBadge}</td>
-            <td class="p-3 sticky-col sticky left-[150px] z-10 border-r border-slate-200 shadow-[2px_0_5px_rgba(0,0,0,0.02)] font-medium text-slate-900 max-w-[200px] truncate tooltip-target cursor-help" data-combined="${item.combined}">${formatTemplateText(item.combined)}</td>
-            <td class="p-3 sticky-col sticky left-[350px] z-10 border-r border-slate-200 text-center font-mono font-bold ${item.overflow > 0 ? 'text-rose-600' : 'text-slate-300'}">${item.overflow > 0 ? `+${item.overflow}` : '0'}</td>
-            <td class="p-3 sticky-col sticky left-[460px] z-10 border-r border-slate-300 shadow-[3px_0_5px_rgba(0,0,0,0.04)]">${issueText}</td>
+            <td class="p-3 sticky-col sticky left-0 z-10 border-r border-slate-200 shadow-[2px_0_5px_rgba(0,0,0,0.02)] bg-inherit">${statusBadge}</td>
+            <td class="p-3 sticky-col sticky left-[150px] z-10 border-r border-slate-200 shadow-[2px_0_5px_rgba(0,0,0,0.02)] font-medium text-slate-900 max-w-[200px] truncate tooltip-target cursor-help bg-inherit" data-combined="${item.combined}">${formatTemplateText(item.combined)}</td>
+            <td class="p-3 sticky-col sticky left-[350px] z-10 border-r border-slate-300 text-center font-mono font-bold bg-inherit ${item.overflow > 0 ? 'text-rose-600' : 'text-slate-300'} shadow-[3px_0_5px_rgba(0,0,0,0.03)]">${item.overflow > 0 ? `+${item.overflow}` : '0'}</td>
         `;
 
-        originalHeaders.forEach((headerName, curIdx) => {
-            let displayValue = item.rowMap[headerName] || '';
+        originalHeaders.forEach((internalHeaderName, curIdx) => {
+            let displayValue = item.rowMap[internalHeaderName] || '';
+            let isT1 = (internalHeaderName === t1HeaderName);
+            let isT2 = (internalHeaderName === t2HeaderName);
             
-            let isT1 = (headerName === t1HeaderName);
-            let isT2 = (headerName === t2HeaderName);
-            
-            let cellStyle = "p-3 text-slate-600 border-r border-slate-100 max-w-[250px] truncate";
+            let cellStyle = "p-3 text-slate-600 border-r border-slate-100 max-w-[250px] truncate text-xs";
             let editableAttr = "";
             let extraDataAttr = "";
 
             if (lenIndices.includes(curIdx)) {
                 cellStyle += " font-mono font-semibold text-center bg-slate-50/50 text-indigo-600";
-                if (curIdx === lenIndices[0]) {
+                const internalLower = internalHeaderName.toLowerCase();
+                if (internalLower.includes('заголовок 1')) {
                     displayValue = item.t1.length;
                     extraDataAttr = `data-len-type="t1"`;
-                } else if (curIdx === lenIndices[1]) {
+                } else if (internalLower.includes('заголовок 2')) {
                     displayValue = item.t2.length;
                     extraDataAttr = `data-len-type="text2"`;
-                } else if (curIdx === lenIndices[2]) {
+                } else if (internalLower.includes('текст')) {
                     displayValue = (item.rowMap[textHeaderName] || '').length;
                     extraDataAttr = `data-len-type="text"`;
                 }
@@ -435,7 +404,7 @@ function renderFullTable() {
                 editableAttr = `contenteditable="true" data-type="t2"`;
             }
 
-            rowHtml += `<td class="${cellStyle}" ${editableAttr} ${extraDataAttr} title="${isT1 || isT2 ? 'Кликните для редактирования' : displayValue}">${isT1 || isT2 ? formatTemplateText(String(displayValue)) : displayValue}</td>`;
+            rowHtml += `<td class="${cellStyle}" ${editableAttr} ${extraDataAttr} title="${displayValue}">${(isT1 || isT2) ? formatTemplateText(String(displayValue)) : displayValue}</td>`;
         });
 
         tr.innerHTML = rowHtml;
@@ -449,29 +418,22 @@ function renderFullTable() {
 
 function initTooltipEvents() {
     const targets = tableBody.querySelectorAll('.tooltip-target');
-    
     targets.forEach(target => {
         target.addEventListener('mouseenter', function() {
             const text = target.getAttribute('data-combined');
-            if (!text) return;
-            
+            if (!text || text === '—') return;
             if (titleTooltip) {
                 titleTooltip.innerHTML = formatTemplateText(text);
                 titleTooltip.classList.remove('hidden');
-                
                 const rect = target.getBoundingClientRect();
                 const tooltipRect = titleTooltip.getBoundingClientRect();
-                
                 let left = rect.left + window.scrollX + (rect.width / 2) - (tooltipRect.width / 2);
                 let top = rect.top + window.scrollY - tooltipRect.height - 8;
-                
                 if (left < 10) left = 10;
-                
                 titleTooltip.style.left = `${left}px`;
                 titleTooltip.style.top = `${top}px`;
             }
         });
-        
         target.addEventListener('mouseleave', function() {
             if (titleTooltip) titleTooltip.classList.add('hidden');
         });
@@ -490,12 +452,12 @@ function initInlineEditingEvents() {
             const rect = cell.getBoundingClientRect();
             liveCounter.style.left = `${rect.left + window.scrollX}px`;
             liveCounter.style.top = `${rect.top + window.scrollY - 28}px`;
-            liveCounter.innerText = `Длина: ${len} симв.`;
+            liveCounter.innerText = `Длина: ${len}`;
             
             if (editType === 't1' && len > 56) {
-                liveCounter.className = "fixed z-50 bg-rose-600 text-white px-2.5 py-1 text-xs font-mono rounded-md shadow-lg pointer-events-none font-bold";
+                liveCounter.className = "fixed z-50 bg-rose-600 text-white px-2 py-0.5 text-xs font-mono rounded shadow-lg pointer-events-none font-bold";
             } else {
-                liveCounter.className = "fixed z-50 bg-slate-900 text-white px-2.5 py-1 text-xs font-mono rounded-md shadow-lg pointer-events-none font-bold";
+                liveCounter.className = "fixed z-50 bg-slate-900 text-white px-2 py-0.5 text-xs font-mono rounded shadow-lg pointer-events-none font-bold";
             }
 
             const tr = cell.closest('tr');
@@ -509,14 +471,14 @@ function initInlineEditingEvents() {
         });
 
         cell.addEventListener('focus', function(e) {
-            const rowIndex = parseInt(cell.closest('tr').getAttribute('data-row-index'));
+            const uniqueKey = cell.closest('tr').getAttribute('data-unique-key');
             const editType = cell.getAttribute('data-type');
-            const dataItem = processedDataset.find(item => item.rowIndex === rowIndex);
+            const dataItem = processedDataset.find(item => item.uniqueKey === uniqueKey);
             if (dataItem) {
                 cell.innerText = editType === 't1' ? dataItem.t1 : dataItem.t2;
             }
 
-            liveCounter.innerText = `Длина: ${cell.innerText.length} симв.`;
+            liveCounter.innerText = `Длина: ${cell.innerText.length}`;
             const rect = cell.getBoundingClientRect();
             liveCounter.style.left = `${rect.left + window.scrollX}px`;
             liveCounter.style.top = `${rect.top + window.scrollY - 28}px`;
@@ -527,11 +489,11 @@ function initInlineEditingEvents() {
             liveCounter.classList.add('hidden');
             
             const tr = cell.closest('tr');
-            const rowIndex = parseInt(tr.getAttribute('data-row-index'));
+            const uniqueKey = tr.getAttribute('data-unique-key');
             const editType = cell.getAttribute('data-type');
             const newText = cell.innerText.trim();
 
-            const dataItem = processedDataset.find(item => item.rowIndex === rowIndex);
+            const dataItem = processedDataset.find(item => item.uniqueKey === uniqueKey);
             if (!dataItem) return;
 
             if (editType === 't1') {
@@ -542,21 +504,20 @@ function initInlineEditingEvents() {
                 dataItem.rowMap[t2HeaderName] = newText;
             }
 
-            const updatedMetrics = computeRowMetrics(rowIndex, dataItem.t1, dataItem.t2, dataItem.rowMap);
+            const updatedMetrics = computeRowMetrics(dataItem.rowIndex, dataItem.t1, dataItem.t2, dataItem.rowMap, uniqueKey);
             Object.assign(dataItem, updatedMetrics);
 
             updateDashboardStats();
             
             const combinedCell = tr.querySelector('td:nth-child(2)');
             const overflowCell = tr.querySelector('td:nth-child(3)');
-            const issueCell = tr.querySelector('td:nth-child(4)');
             const statusCell = tr.querySelector('td:nth-child(1)');
 
             combinedCell.innerHTML = formatTemplateText(dataItem.combined);
             combinedCell.setAttribute('data-combined', dataItem.combined);
             
             overflowCell.innerText = dataItem.overflow > 0 ? `+${dataItem.overflow}` : '0';
-            overflowCell.className = `p-3 sticky-col sticky left-[350px] z-10 border-r border-slate-200 text-center font-mono font-bold ${dataItem.overflow > 0 ? 'text-rose-600' : 'text-slate-300'}`;
+            overflowCell.className = `p-3 sticky-col sticky left-[350px] z-10 border-r border-slate-300 text-center font-mono font-bold bg-inherit ${dataItem.overflow > 0 ? 'text-rose-600' : 'text-slate-300'} shadow-[3px_0_5px_rgba(0,0,0,0.03)]`;
 
             const lenT1Cell = tr.querySelector('td[data-len-type="t1"]');
             if (lenT1Cell) lenT1Cell.innerText = dataItem.t1.length;
@@ -565,27 +526,21 @@ function initInlineEditingEvents() {
             if (lenT2Cell) lenT2Cell.innerText = dataItem.t2.length;
 
             if (dataItem.statusType === 'no-t2') {
-                statusCell.innerHTML = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200"><i data-lucide="minus-circle" class="w-3 h-3"></i> Нет доп. заголовка</span>`;
-                issueCell.innerHTML = '—';
-                tr.className = "hover:bg-slate-50/80 transition-colors group";
+                statusCell.innerHTML = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200"><i data-lucide="minus-circle" class="w-3 h-3"></i> Нет доп. заг.</span>`;
+                tr.className = "hover:bg-slate-50/80 transition-colors group bg-white";
             } else if (dataItem.statusType === 'lost-utp') {
-                statusCell.innerHTML = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-bold bg-rose-50 text-rose-700 border border-rose-200"><i data-lucide="alert-circle" class="w-3 h-3"></i> Доп. заголовок будет отброшен</span>`;
-                issueCell.innerHTML = `<span class="text-rose-600 font-semibold text-xs">Теряет УТП: ${dataItem.utpReasons.join(', ')}</span>`;
+                statusCell.innerHTML = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-bold bg-rose-50 text-rose-700 border border-rose-200" title="Теряет УТП: ${dataItem.utpReasons.join(', ')}"><i data-lucide="alert-circle" class="w-3 h-3"></i> Теряет УТП</span>`;
                 tr.className = "bg-rose-50/10 hover:bg-rose-50/20 transition-colors group";
             } else if (dataItem.statusType === 'lost-safe') {
-                statusCell.innerHTML = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200"><i data-lucide="scissors" class="w-3 h-3"></i> Срез доп. заг-ка</span>`;
-                issueCell.innerHTML = '—';
+                statusCell.innerHTML = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200"><i data-lucide="scissors" class="w-3 h-3"></i> Срез доп. заг.</span>`;
                 tr.className = "bg-amber-50/5 hover:bg-amber-50/15 transition-colors group";
             } else {
-                statusCell.innerHTML = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200"><i data-lucide="check" class="w-3 h-3"></i> Перенесется</span>`;
-                issueCell.innerHTML = '—';
-                tr.className = "hover:bg-slate-50/80 transition-colors group";
+                statusCell.innerHTML = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200"><i data-lucide="check" class="w-3 h-3"></i> Склеится</span>`;
+                tr.className = "hover:bg-slate-50/80 transition-colors group bg-white";
             }
 
             cell.innerHTML = formatTemplateText(newText);
             lucide.createIcons();
-            
-            saveStateToDB(); // Сохраняем изменения после каждого редактирования «на лету»
         });
 
         cell.addEventListener('keydown', function(e) {
@@ -606,28 +561,71 @@ function downloadUpdatedXLSX() {
         exportRows.push(rawExcelRows[i]);
     }
 
-    const textColIdx = originalHeaders.indexOf(textHeaderName);
-    const lenIndices = (textColIdx !== -1) ? [textColIdx + 1, textColIdx + 2, textColIdx + 3] : [];
+    const rawHeaders = rawExcelRows[headerRowGlobalIndex].map(c => String(c || '').trim());
 
-    processedDataset.forEach(item => {
-        const singleRowArray = [];
-        originalHeaders.forEach((headerName, curIdx) => {
-            let val = item.rowMap[headerName] || '';
-            
-            if (lenIndices.includes(curIdx)) {
-                if (curIdx === lenIndices[0]) val = item.t1.length;
-                else if (curIdx === lenIndices[1]) val = item.t2.length;
-                else if (curIdx === lenIndices[2]) val = (item.rowMap[textHeaderName] || '').length;
+    let startDataRow = headerRowGlobalIndex + 1;
+    if (startDataRow < rawExcelRows.length && rawExcelRows[startDataRow]) {
+        const checkRow = rawExcelRows[startDataRow].map(c => String(c || '').toLowerCase().trim());
+        if (checkRow.includes('заголовок 1') || checkRow.includes('текст') || checkRow.some(c => c === '55' || c === '35')) {
+            startDataRow++;
+        }
+    }
+
+    const textContentIndices = [];
+    originalHeaders.forEach((header, idx) => {
+        const hLower = header.toLowerCase();
+        if (hLower.includes('заголовок') || hLower.includes('текст')) {
+            if (!hLower.includes('длина')) {
+                textContentIndices.push(idx);
             }
-            
-            if (val !== '' && !isNaN(val) && (lenIndices.includes(curIdx) || headerName.toLowerCase().includes('длина'))) {
+        }
+    });
+
+    for (let i = startDataRow; i < rawExcelRows.length; i++) {
+        const row = rawExcelRows[i];
+        if (!row || row.length === 0) {
+            exportRows.push(row);
+            continue;
+        }
+
+        const title1 = row[originalHeaders.indexOf(t1HeaderName)] !== undefined ? String(row[originalHeaders.indexOf(t1HeaderName)]).trim() : '';
+        const title2 = row[originalHeaders.indexOf(t2HeaderName)] !== undefined ? String(row[originalHeaders.indexOf(t2HeaderName)]).trim() : '';
+        const adId = row[originalHeaders.indexOf(idAdHeaderName)] !== undefined ? String(row[originalHeaders.indexOf(idAdHeaderName)]).trim() : '';
+
+        const currentLineKey = adId ? `id_${adId}_t1_${title1}_t2_${title2}` : `t1_${title1}_t2_${title2}`;
+
+        const editedItem = processedDataset.find(item => item.uniqueKey === currentLineKey);
+        const singleRowArray = [];
+        
+        originalHeaders.forEach((internalHeaderName, curIdx) => {
+            let val = row[curIdx] !== undefined ? row[curIdx] : '';
+            const rawHeaderName = rawHeaders[curIdx] || '';
+            const hNameLower = internalHeaderName.toLowerCase();
+
+            if (editedItem) {
+                if (hNameLower.includes('длина')) {
+                    const targetRawHeader = rawHeaderName.replace(/Длина\s+/i, '').trim();
+                    const targetInternalIdx = originalHeaders.indexOf(targetRawHeader);
+                    
+                    if (targetInternalIdx !== -1) {
+                        const internalKey = originalHeaders[targetInternalIdx];
+                        const actualText = editedItem.rowMap[internalKey] || '';
+                        val = actualText.length;
+                    }
+                } else if (editedItem.rowMap[internalHeaderName] !== undefined) {
+                    val = editedItem.rowMap[internalHeaderName];
+                }
+            }
+
+            if (val !== '' && !isNaN(val) && hNameLower.includes('длина')) {
                 singleRowArray.push(Number(val));
             } else {
                 singleRowArray.push(val);
             }
         });
+        
         exportRows.push(singleRowArray);
-    });
+    }
 
     const wb = XLSX.utils.book_new();
     const ws = XLSX.utils.aoa_to_sheet(exportRows);
