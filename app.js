@@ -45,7 +45,6 @@ function handleFileSelect(event) {
 
     uploadText.innerText = file.name;
     
-    // Определяем правильное расширение для результирующего файла
     let extension = '.xlsx';
     if (file.name.endsWith('.xls')) extension = '.xls';
     if (file.name.endsWith('.csv')) extension = '.csv';
@@ -56,8 +55,6 @@ function handleFileSelect(event) {
     const reader = new FileReader();
     reader.onload = function(e) {
         const data = new Uint8Array(e.target.result);
-        
-        // codepage: 65001 принудительно открывает CSV в UTF-8, предотвращая проблемы с кириллицей
         const workbook = XLSX.read(data, { type: 'array', codepage: 65001 });
         const worksheet = workbook.Sheets[workbook.SheetNames[0]];
         
@@ -138,6 +135,23 @@ function computeRowMetrics(rowIndex, t1, t2, rowMap) {
     let isMerged = false;
     let totalLength = t1.length;
     let overflow = 0;
+
+    // Проверяем, пустой ли Заголовок 2
+    if (!cleanTitle2) {
+        return {
+            rowIndex: rowIndex,
+            t1: t1,
+            t2: '',
+            combined: t1,
+            isMerged: true,
+            length: t1.length,
+            overflow: 0,
+            statusType: 'no-t2', // Новый статус для пустых З2
+            statusWeight: 4, 
+            utpReasons: [],
+            rowMap: rowMap 
+        };
+    }
 
     if (cleanTitle2) {
         const potential = t1 + ". " + cleanTitle2;
@@ -254,7 +268,11 @@ function renderFullTable() {
 
     let displayData = [...processedDataset];
     
-    if (currentFilter !== 'all') {
+    // Новая логика фильтрации кнопок
+    if (currentFilter === 'has-t2') {
+        // Фильтр "Есть доп. заголовок": исключаем строки, где З2 пустой
+        displayData = displayData.filter(item => item.statusType !== 'no-t2');
+    } else if (currentFilter !== 'all') {
         displayData = displayData.filter(item => item.statusType === currentFilter);
     }
 
@@ -288,7 +306,11 @@ function renderFullTable() {
         let rowBgClass = '';
         let issueText = '—';
 
-        if (item.statusType === 'lost-utp') {
+        if (item.statusType === 'no-t2') {
+            // Вывод кастомного статуса для объявлений без З2
+            statusBadge = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-slate-100 text-slate-600 border border-slate-200"><i data-lucide="minus-circle" class="w-3 h-3"></i> Нет доп. заг-ка</span>`;
+            rowBgClass = 'bg-slate-50/40 text-slate-400';
+        } else if (item.statusType === 'lost-utp') {
             statusBadge = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-bold bg-rose-50 text-rose-700 border border-rose-200"><i data-lucide="alert-circle" class="w-3 h-3"></i> Доп. заголовок будет отброшен</span>`;
             rowBgClass = 'bg-rose-50/10 hover:bg-rose-50/20';
             issueText = `<span class="text-rose-600 font-semibold text-xs">Теряет УТП: ${item.utpReasons.join(', ')}</span>`;
@@ -299,7 +321,8 @@ function renderFullTable() {
             statusBadge = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200"><i data-lucide="check" class="w-3 h-3"></i> Перенесется</span>`;
         }
 
-        if (rowBgClass) tr.className = rowBgClass;
+        if (rowBgClass && item.statusType !== 'no-t2') tr.className = rowBgClass;
+        if (item.statusType === 'no-t2') tr.className = rowBgClass + " transition-colors group";
 
         let rowHtml = `
             <td class="p-3 sticky-col sticky left-0 z-10 border-r border-slate-200 shadow-[2px_0_5px_rgba(0,0,0,0.02)]">${statusBadge}</td>
@@ -470,7 +493,11 @@ function initInlineEditingEvents() {
             const lenT2Cell = tr.querySelector('td[data-len-type="text2"]');
             if (lenT2Cell) lenT2Cell.innerText = dataItem.t2.length;
 
-            if (dataItem.statusType === 'lost-utp') {
+            if (dataItem.statusType === 'no-t2') {
+                statusCell.innerHTML = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-slate-100 text-slate-600 border border-slate-200"><i data-lucide="minus-circle" class="w-3 h-3"></i> Нет доп. заг-ка</span>`;
+                issueCell.innerHTML = '—';
+                tr.className = "bg-slate-50/40 text-slate-400 transition-colors group";
+            } else if (dataItem.statusType === 'lost-utp') {
                 statusCell.innerHTML = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-bold bg-rose-50 text-rose-700 border border-rose-200"><i data-lucide="alert-circle" class="w-3 h-3"></i> Доп. заголовок будет отброшен</span>`;
                 issueCell.innerHTML = `<span class="text-rose-600 font-semibold text-xs">Теряет УТП: ${dataItem.utpReasons.join(', ')}</span>`;
                 tr.className = "bg-rose-50/10 hover:bg-rose-50/20 transition-colors group";
@@ -532,7 +559,6 @@ function downloadUpdatedXLSX() {
     const wb = XLSX.utils.book_new();
     const ws = XLSX.utils.aoa_to_sheet(exportRows);
     
-    // Поддержка экспорта в зависимости от формата исходного файла
     if (outputFileName.endsWith('.csv')) {
         XLSX.utils.book_append_sheet(wb, ws, "Кампания");
         XLSX.writeFile(wb, outputFileName, { bookType: 'csv', FS: ';' }); 
