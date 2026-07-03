@@ -12,6 +12,7 @@ let outputFileName = 'compiled_campaign.xlsx';
 let t1HeaderName = 'Заголовок 1';
 let t2HeaderName = 'Заголовок 2';
 let textHeaderName = 'Текст';
+let typeHeaderName = 'Тип объявления'; // Добавили отслеживание типа
 let headerRowGlobalIndex = -1;
 
 const fileInput = document.getElementById('excelFile');
@@ -38,85 +39,6 @@ filterBtns.forEach(btn => {
         renderFullTable();
     });
 });
-
-// ==========================================
-// БЛОК РАБОТЫ С INDEXEDDB (АВТОСОХРАНЕНИЕ)
-// ==========================================
-const DB_NAME = 'YandexDirectAppDB';
-const DB_VERSION = 1;
-const STORE_NAME = 'AppState';
-
-function openDB() {
-    return new Promise((resolve, reject) => {
-        const request = indexedDB.open(DB_NAME, DB_VERSION);
-        request.onupgradeneeded = (e) => {
-            const db = e.target.result;
-            if (!db.objectStoreNames.contains(STORE_NAME)) {
-                db.createObjectStore(STORE_NAME);
-            }
-        };
-        request.onsuccess = (e) => resolve(e.target.result);
-        request.onerror = (e) => reject(e.target.error);
-    });
-}
-
-async function saveStateToDB() {
-    try {
-        const db = await openDB();
-        const tx = db.transaction(STORE_NAME, 'readwrite');
-        const store = tx.objectStore(STORE_NAME);
-        
-        const state = {
-            rawExcelRows,
-            originalHeaders,
-            processedDataset,
-            outputFileName,
-            headerRowGlobalIndex
-        };
-        
-        store.put(state, 'current_session');
-    } catch (err) {
-        console.error('Ошибка сохранения данных в IndexedDB:', err);
-    }
-}
-
-async function loadStateFromDB() {
-    try {
-        const db = await openDB();
-        const tx = db.transaction(STORE_NAME, 'readonly');
-        const store = tx.objectStore(STORE_NAME);
-        
-        return new Promise((resolve) => {
-            const request = store.get('current_session');
-            request.onsuccess = () => resolve(request.result || null);
-            request.onerror = () => resolve(null);
-        });
-    } catch (err) {
-        console.error('Ошибка загрузки данных из IndexedDB:', err);
-        return null;
-    }
-}
-
-// Инициализация при загрузке страницы
-document.addEventListener('DOMContentLoaded', async () => {
-    const savedState = await loadStateFromDB();
-    if (savedState && savedState.processedDataset && savedState.processedDataset.length > 0) {
-        rawExcelRows = savedState.rawExcelRows || [];
-        originalHeaders = savedState.originalHeaders || [];
-        processedDataset = savedState.processedDataset || [];
-        outputFileName = savedState.outputFileName || 'compiled_campaign.xlsx';
-        headerRowGlobalIndex = savedState.headerRowGlobalIndex !== undefined ? savedState.headerRowGlobalIndex : -1;
-        
-        uploadText.innerText = `Восстановлено: ${outputFileName}`;
-        downloadFileBtn.removeAttribute('disabled');
-        downloadFileBtn.className = "bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-3 px-5 rounded-xl transition-all flex items-center gap-2 shadow-md text-sm active:scale-98 cursor-pointer";
-        
-        updateDashboardStats();
-        buildTableHeader();
-        renderFullTable();
-    }
-});
-// ==========================================
 
 function handleFileSelect(event) {
     const file = event.target.files[0];
@@ -193,34 +115,47 @@ function analyzeStructureAndProcess() {
             rowMap[header] = row[colIdx] !== undefined ? String(row[colIdx]).trim() : '';
         });
 
+        // Теперь мы НЕ пропускаем строки без Заголовка 1 (---, пустые, комбинаторные и т.д.)
         const title1 = rowMap[t1HeaderName] || '';
-        if (!title1 || title1 === '-' || title1.startsWith('---')) continue; 
-
         const title2 = rowMap[t2HeaderName] || '';
+        const adType = rowMap[typeHeaderName] || '—';
         
-        const analyzedRow = computeRowMetrics(i, title1, title2, rowMap);
+        const analyzedRow = computeRowMetrics(i, title1, title2, adType, rowMap);
         processedDataset.push(analyzedRow);
     }
 
     updateDashboardStats();
     buildTableHeader();
     renderFullTable();
-    saveStateToDB(); // Сохраняем первичную загрузку
 }
 
-function computeRowMetrics(rowIndex, t1, t2, rowMap) {
+function computeRowMetrics(rowIndex, t1, t2, adType, rowMap) {
     const cleanTitle2 = (t2 === '-' || t2 === '0') ? '' : t2;
 
-    let combinedTitle = t1;
-    let isMerged = false;
-    let totalLength = t1.length;
-    let overflow = 0;
+    // Если это техническая строка или тип объявления не подразумевает классические заголовки
+    if (!t1 || t1 === '-' || t1.startsWith('---')) {
+        return {
+            rowIndex: rowIndex,
+            t1: t1,
+            t2: cleanTitle2,
+            adType: adType,
+            combined: t1 || '—',
+            isMerged: true,
+            length: (t1 || '').length,
+            overflow: 0,
+            statusType: 'other-type',
+            statusWeight: 5, 
+            utpReasons: [],
+            rowMap: rowMap 
+        };
+    }
 
     if (!cleanTitle2) {
         return {
             rowIndex: rowIndex,
             t1: t1,
             t2: '',
+            adType: adType,
             combined: t1,
             isMerged: true,
             length: t1.length,
@@ -233,6 +168,11 @@ function computeRowMetrics(rowIndex, t1, t2, rowMap) {
     }
 
     const potential = t1 + ". " + cleanTitle2;
+    let combinedTitle = t1;
+    let isMerged = false;
+    let totalLength = t1.length;
+    let overflow = 0;
+
     if (potential.length <= 56) {
         combinedTitle = potential;
         isMerged = true;
@@ -259,6 +199,7 @@ function computeRowMetrics(rowIndex, t1, t2, rowMap) {
         rowIndex: rowIndex,
         t1: t1,
         t2: cleanTitle2,
+        adType: adType,
         combined: combinedTitle,
         isMerged: isMerged,
         length: totalLength,
@@ -296,15 +237,17 @@ function updateDashboardStats() {
 }
 
 function buildTableHeader() {
+    // Добавили фиксированный столбец "Тип объявления" в шапку таблицы перед "Итоговым заголовком"
     let html = `
         <th id="sortStatusBtn" class="py-4 px-4 bg-slate-100 text-slate-700 sticky left-0 z-30 border-r border-slate-200 shadow-[2px_0_5px_rgba(0,0,0,0.03)] min-w-[150px] cursor-pointer hover:bg-slate-200 transition-colors select-none">
             <div class="flex items-center gap-1.5">
                 Статус переноса <span id="sortIndicator" class="text-indigo-600 font-mono text-xs">↕</span>
             </div>
         </th>
-        <th class="py-4 px-4 bg-slate-100 text-slate-700 sticky left-[150px] z-30 border-r border-slate-200 min-w-[200px]">Итоговый заголовок</th>
-        <th class="py-4 px-4 bg-slate-100 text-slate-700 sticky left-[350px] z-30 border-r border-slate-200 text-center min-w-[110px]">Превышение</th>
-        <th class="py-4 px-4 bg-slate-100 text-slate-700 sticky left-[460px] z-30 border-r border-slate-300 shadow-[3px_0_5px_rgba(0,0,0,0.05)] min-w-[150px]">Проблемы</th>
+        <th class="py-4 px-4 bg-slate-100 text-slate-700 sticky left-[150px] z-30 border-r border-slate-200 min-w-[140px]">Тип объявления</th>
+        <th class="py-4 px-4 bg-slate-100 text-slate-700 sticky left-[290px] z-30 border-r border-slate-200 min-w-[200px]">Итоговый заголовок</th>
+        <th class="py-4 px-4 bg-slate-100 text-slate-700 sticky left-[490px] z-30 border-r border-slate-200 text-center min-w-[110px]">Превышение</th>
+        <th class="py-4 px-4 bg-slate-100 text-slate-700 sticky left-[600px] z-30 border-r border-slate-300 shadow-[3px_0_5px_rgba(0,0,0,0.05)] min-w-[150px]">Проблемы</th>
     `;
 
     originalHeaders.forEach(header => {
@@ -344,7 +287,7 @@ function renderFullTable() {
     let displayData = [...processedDataset];
     
     if (currentFilter === 'has-t2') {
-        displayData = displayData.filter(item => item.statusType !== 'no-t2');
+        displayData = displayData.filter(item => item.statusType !== 'no-t2' && item.statusType !== 'other-type');
     } else if (currentFilter !== 'all') {
         displayData = displayData.filter(item => item.statusType === currentFilter);
     }
@@ -353,7 +296,8 @@ function renderFullTable() {
         displayData = displayData.filter(item => 
             item.t1.toLowerCase().includes(searchQuery) || 
             item.t2.toLowerCase().includes(searchQuery) ||
-            item.combined.toLowerCase().includes(searchQuery)
+            item.combined.toLowerCase().includes(searchQuery) ||
+            item.adType.toLowerCase().includes(searchQuery)
         );
     }
 
@@ -363,7 +307,7 @@ function renderFullTable() {
     document.getElementById('tableCounter').innerText = `Строк: ${displayData.length}`;
 
     if (displayData.length === 0) {
-        tableBody.innerHTML = `<tr><td colspan="${originalHeaders.length + 4}" class="py-12 text-center text-slate-400">Ничего не найдено.</td></tr>`;
+        tableBody.innerHTML = `<tr><td colspan="${originalHeaders.length + 5}" class="py-12 text-center text-slate-400">Ничего не найдено.</td></tr>`;
         return;
     }
 
@@ -389,17 +333,22 @@ function renderFullTable() {
         } else if (item.statusType === 'lost-safe') {
             statusBadge = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200"><i data-lucide="scissors" class="w-3 h-3"></i> Срез доп. заг-ка</span>`;
             rowBgClass = 'bg-amber-50/5 hover:bg-amber-50/15';
+        } else if (item.statusType === 'other-type') {
+            statusBadge = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-slate-100 text-slate-600 border border-slate-200"><i data-lucide="info" class="w-3 h-3"></i> Без изменений</span>`;
+            rowBgClass = 'bg-slate-50/30 text-slate-400';
         } else {
             statusBadge = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200"><i data-lucide="check" class="w-3 h-3"></i> Перенесется</span>`;
         }
 
         if (rowBgClass) tr.className = rowBgClass + " transition-colors group";
 
+        // Обновили отступы sticky-столбцов с учетом новой колонки "Тип объявления"
         let rowHtml = `
-            <td class="p-3 sticky-col sticky left-0 z-10 border-r border-slate-200 shadow-[2px_0_5px_rgba(0,0,0,0.02)]">${statusBadge}</td>
-            <td class="p-3 sticky-col sticky left-[150px] z-10 border-r border-slate-200 shadow-[2px_0_5px_rgba(0,0,0,0.02)] font-medium text-slate-900 max-w-[200px] truncate tooltip-target cursor-help" data-combined="${item.combined}">${formatTemplateText(item.combined)}</td>
-            <td class="p-3 sticky-col sticky left-[350px] z-10 border-r border-slate-200 text-center font-mono font-bold ${item.overflow > 0 ? 'text-rose-600' : 'text-slate-300'}">${item.overflow > 0 ? `+${item.overflow}` : '0'}</td>
-            <td class="p-3 sticky-col sticky left-[460px] z-10 border-r border-slate-300 shadow-[3px_0_5px_rgba(0,0,0,0.04)]">${issueText}</td>
+            <td class="p-3 sticky-col sticky left-0 z-10 border-r border-slate-200 shadow-[2px_0_5px_rgba(0,0,0,0.02)] bg-inherit">${statusBadge}</td>
+            <td class="p-3 sticky-col sticky left-[150px] z-10 border-r border-slate-200 bg-inherit font-medium text-slate-700 text-xs">${item.adType}</td>
+            <td class="p-3 sticky-col sticky left-[290px] z-10 border-r border-slate-200 shadow-[2px_0_5px_rgba(0,0,0,0.02)] font-medium text-slate-900 max-w-[200px] truncate tooltip-target cursor-help bg-inherit" data-combined="${item.combined}">${formatTemplateText(item.combined)}</td>
+            <td class="p-3 sticky-col sticky left-[490px] z-10 border-r border-slate-200 text-center font-mono font-bold bg-inherit ${item.overflow > 0 ? 'text-rose-600' : 'text-slate-300'}">${item.overflow > 0 ? `+${item.overflow}` : '0'}</td>
+            <td class="p-3 sticky-col sticky left-[600px] z-10 border-r border-slate-300 shadow-[3px_0_5px_rgba(0,0,0,0.04)] bg-inherit">${issueText}</td>
         `;
 
         originalHeaders.forEach((headerName, curIdx) => {
@@ -426,16 +375,17 @@ function renderFullTable() {
                 }
             }
             
-            if (isT1) {
+            // Запрещаем редактирование пустых/нерелевантных ячеек для "других" типов
+            if (isT1 && item.statusType !== 'other-type') {
                 cellStyle += " bg-indigo-50/40 text-slate-900 font-medium editable-cell cursor-text";
                 editableAttr = `contenteditable="true" data-type="t1"`;
             }
-            if (isT2) {
+            if (isT2 && item.statusType !== 'other-type') {
                 cellStyle += " bg-amber-50/30 text-slate-900 font-medium editable-cell cursor-text";
                 editableAttr = `contenteditable="true" data-type="t2"`;
             }
 
-            rowHtml += `<td class="${cellStyle}" ${editableAttr} ${extraDataAttr} title="${isT1 || isT2 ? 'Кликните для редактирования' : displayValue}">${isT1 || isT2 ? formatTemplateText(String(displayValue)) : displayValue}</td>`;
+            rowHtml += `<td class="${cellStyle}" ${editableAttr} ${extraDataAttr} title="${(isT1 || isT2) && item.statusType !== 'other-type' ? 'Кликните для редактирования' : displayValue}">${(isT1 || isT2) && item.statusType !== 'other-type' ? formatTemplateText(String(displayValue)) : displayValue}</td>`;
         });
 
         tr.innerHTML = rowHtml;
@@ -453,7 +403,7 @@ function initTooltipEvents() {
     targets.forEach(target => {
         target.addEventListener('mouseenter', function() {
             const text = target.getAttribute('data-combined');
-            if (!text) return;
+            if (!text || text === '—') return;
             
             if (titleTooltip) {
                 titleTooltip.innerHTML = formatTemplateText(text);
@@ -542,21 +492,21 @@ function initInlineEditingEvents() {
                 dataItem.rowMap[t2HeaderName] = newText;
             }
 
-            const updatedMetrics = computeRowMetrics(rowIndex, dataItem.t1, dataItem.t2, dataItem.rowMap);
+            const updatedMetrics = computeRowMetrics(rowIndex, dataItem.t1, dataItem.t2, dataItem.adType, dataItem.rowMap);
             Object.assign(dataItem, updatedMetrics);
 
             updateDashboardStats();
             
-            const combinedCell = tr.querySelector('td:nth-child(2)');
-            const overflowCell = tr.querySelector('td:nth-child(3)');
-            const issueCell = tr.querySelector('td:nth-child(4)');
+            const combinedCell = tr.querySelector('td:nth-child(3)'); // Сдвиг на 1 позицию вправо
+            const overflowCell = tr.querySelector('td:nth-child(4)'); // Сдвиг на 1 позицию вправо
+            const issueCell = tr.querySelector('td:nth-child(5)');    // Сдвиг на 1 позицию вправо
             const statusCell = tr.querySelector('td:nth-child(1)');
 
             combinedCell.innerHTML = formatTemplateText(dataItem.combined);
             combinedCell.setAttribute('data-combined', dataItem.combined);
             
             overflowCell.innerText = dataItem.overflow > 0 ? `+${dataItem.overflow}` : '0';
-            overflowCell.className = `p-3 sticky-col sticky left-[350px] z-10 border-r border-slate-200 text-center font-mono font-bold ${dataItem.overflow > 0 ? 'text-rose-600' : 'text-slate-300'}`;
+            overflowCell.className = `p-3 sticky-col sticky left-[490px] z-10 border-r border-slate-200 text-center font-mono font-bold bg-inherit ${dataItem.overflow > 0 ? 'text-rose-600' : 'text-slate-300'}`;
 
             const lenT1Cell = tr.querySelector('td[data-len-type="t1"]');
             if (lenT1Cell) lenT1Cell.innerText = dataItem.t1.length;
@@ -584,8 +534,6 @@ function initInlineEditingEvents() {
 
             cell.innerHTML = formatTemplateText(newText);
             lucide.createIcons();
-            
-            saveStateToDB(); // Сохраняем изменения после каждого редактирования «на лету»
         });
 
         cell.addEventListener('keydown', function(e) {
@@ -615,9 +563,12 @@ function downloadUpdatedXLSX() {
             let val = item.rowMap[headerName] || '';
             
             if (lenIndices.includes(curIdx)) {
-                if (curIdx === lenIndices[0]) val = item.t1.length;
-                else if (curIdx === lenIndices[1]) val = item.t2.length;
-                else if (curIdx === lenIndices[2]) val = (item.rowMap[textHeaderName] || '').length;
+                // Длины пересчитываем только для стандартных объявлений, у которых есть эти поля
+                if (item.statusType !== 'other-type') {
+                    if (curIdx === lenIndices[0]) val = item.t1.length;
+                    else if (curIdx === lenIndices[1]) val = item.t2.length;
+                    else if (curIdx === lenIndices[2]) val = (item.rowMap[textHeaderName] || '').length;
+                }
             }
             
             if (val !== '' && !isNaN(val) && (lenIndices.includes(curIdx) || headerName.toLowerCase().includes('длина'))) {
