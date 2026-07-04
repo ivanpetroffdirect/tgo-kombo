@@ -144,90 +144,68 @@ function handleFileSelect(event) {
             return;
         }
 
-        function analyzeStructureAndProcess() {
-    let headerRowIndex = -1;
+        analyzeStructureAndProcess();
+        downloadFileBtn.removeAttribute('disabled');
+        downloadFileBtn.className = "bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-3 px-5 rounded-xl transition-all flex items-center gap-2 shadow-md text-sm active:scale-98 cursor-pointer";
+    };
+    reader.readAsArrayBuffer(file);
+}
 
-    for (let i = 0; i < Math.min(rawExcelRows.length, 30); i++) {
-        if (!rawExcelRows[i]) continue;
-        const rowStr = rawExcelRows[i].map(cell => String(cell || '').trim());
-        
-        const foundT1 = rowStr.indexOf(t1HeaderName);
-        const hasIdCol = rowStr.some(c => {
-            const low = c.toLowerCase();
-            return low.includes('id') || low.includes('номер') || low.includes('групп') || low.includes('объявл');
-        });
+function analyzeStructureAndProcess() {
+    let headerRowIndex = -1;
 
-        if (foundT1 !== -1 && hasIdCol) {
-            headerRowIndex = i;
-            headerRowGlobalIndex = i;
-            originalHeaders = rowStr;
-            break;
-        }
-    }
+    for (let i = 0; i < Math.min(rawExcelRows.length, 30); i++) {
+        if (!rawExcelRows[i]) continue;
+        const rowStr = rawExcelRows[i].map(cell => String(cell || '').trim());
+        
+        const foundT1 = rowStr.indexOf(t1HeaderName);
+        const hasIdCol = rowStr.some(c => c.includes('ID объявления') || c.includes('ID группы'));
 
-    if (headerRowIndex === -1) {
-        alert("Не удалось найти строку заголовков с полем 'Заголовок 1'.");
-        return;
-    }
+        if (foundT1 !== -1 && hasIdCol) {
+            headerRowIndex = i;
+            headerRowGlobalIndex = i;
+            originalHeaders = rowStr;
+            break;
+        }
+    }
 
-    let startDataRow = headerRowIndex + 1;
-    if (startDataRow < rawExcelRows.length && rawExcelRows[startDataRow]) {
-        const checkRow = rawExcelRows[startDataRow].map(c => String(c || '').toLowerCase().trim());
-        if (checkRow.includes('заголовок 1') || checkRow.includes('текст') || checkRow.some(c => c === '55' || c === '35')) {
-            startDataRow++;
-        }
-    }
+    if (headerRowIndex === -1) {
+        alert("Не удалось найти строку заголовков с полем 'Заголовок 1'.");
+        return;
+    }
 
-    // Приводим заголовки к нижнему регистру для точного поиска нужных колонок
-    const lowerHeaders = originalHeaders.map(h => h.toLowerCase().trim());
-    
-    // Находим точные названия колонок ID группы и ID объявления в исходном регистре файла
-    const exactGroupKey = originalHeaders[lowerHeaders.findIndex(h => h.includes('id группы') || h === 'группа' || h.includes('номер группы'))] || '';
-    const exactAdKey = originalHeaders[lowerHeaders.findIndex(h => h.includes('id объявления') || h === 'объявление' || h.includes('номер объявления'))] || '';
+    let startDataRow = headerRowIndex + 1;
+    if (startDataRow < rawExcelRows.length && rawExcelRows[startDataRow]) {
+        const checkRow = rawExcelRows[startDataRow].map(c => String(c || '').toLowerCase().trim());
+        if (checkRow.includes('заголовок 1') || checkRow.includes('текст') || checkRow.some(c => c === '55' || c === '35')) {
+            startDataRow++;
+        }
+    }
 
-    processedDataset = [];
-    const uniqueAdsKeys = new Set();
+    processedDataset = [];
 
-    for (let i = startDataRow; i < rawExcelRows.length; i++) {
-        const row = rawExcelRows[i];
-        if (!row || row.length === 0) continue;
+    for (let i = startDataRow; i < rawExcelRows.length; i++) {
+        const row = rawExcelRows[i];
+        if (!row || row.length === 0) continue;
 
-        const rowMap = {};
-        originalHeaders.forEach((header, colIdx) => {
-            rowMap[header] = row[colIdx] !== undefined ? String(row[colIdx]).trim() : '';
-        });
+        const rowMap = {};
+        originalHeaders.forEach((header, colIdx) => {
+            rowMap[header] = row[colIdx] !== undefined ? String(row[colIdx]).trim() : '';
+        });
 
-        const title1 = rowMap[t1HeaderName] || '';
-        if (!title1 || title1 === '-' || title1.startsWith('---')) continue; 
+        const title1 = rowMap[t1HeaderName] || '';
+        if (!title1 || title1 === '-' || title1.startsWith('---')) continue; 
 
-        // Извлекаем ID группы и ID объявления
-        const groupId = exactGroupKey ? (rowMap[exactGroupKey] || '').trim() : '';
-        const adId = exactAdKey ? (rowMap[exactAdKey] || '').trim() : '';
+        const title2 = rowMap[t2HeaderName] || '';
+        
+        const analyzedRow = computeRowMetrics(i, title1, title2, rowMap);
+        processedDataset.push(analyzedRow);
+    }
 
-        let adKey = '';
-        // Склеиваем только если ОБА идентификатора существуют и не являются пустыми/дефисами
-        if (adId && adId !== '-' && groupId && groupId !== '-') {
-            adKey = `group_${groupId}_ad_${adId}`;
-        } else {
-            // Если ID нет (новые объявления), генерируем уникальный ключ по индексу строки, чтобы они НЕ склеивались
-            adKey = `row_${i}`;
-        }
-
-        // Если такое сочетание ID группы и ID объявления уже было, пропускаем дубликат
-        if (uniqueAdsKeys.has(adKey)) {
-            continue;
-        }
-        
-        uniqueAdsKeys.add(adKey);
-
-        const analyzedRow = computeRowMetrics(i, title1, rowMap[t2HeaderName] || '', rowMap);
-        processedDataset.push(analyzedRow);
-    }
-
-    updateDashboardStats();
-    buildTableHeader();
-    renderFullTable();
-    saveStateToDB(); 
+    updateDashboardStats();
+    buildTableHeader();
+    renderFullTable();
+    saveStateToDB(); // Сохраняем первичную загрузку
 }
 
 function computeRowMetrics(rowIndex, t1, t2, rowMap) {
