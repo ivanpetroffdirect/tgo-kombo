@@ -209,7 +209,7 @@ function updateDashboardStats() {
 
     document.getElementById('statTotal').innerText = total;
     document.getElementById('statSuccess').innerText = success;
-    document.getElementById('statSuccessPct').innerText = `${pct}% от всех объявлений`;
+    //document.getElementById('statSuccessPct').innerText = `${pct}% от всех объявлений`;
     document.getElementById('statCut').innerText = cut;
     document.getElementById('statLoss').innerText = loss;
 }
