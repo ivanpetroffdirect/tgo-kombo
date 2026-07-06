@@ -162,7 +162,6 @@ function analyzeStructureAndProcess() {
         const rowStr = rawExcelRows[i].map(cell => String(cell || '').trim());
         
         const foundT1 = rowStr.indexOf(t1HeaderName); // "Заголовок 1" ищем как есть
-        // Проверяем ID без учета регистра букв:
         const hasIdCol = rowStr.some(c => {
             const low = c.toLowerCase();
             return low.includes('id объявления') || low.includes('id группы') || low === 'id';
@@ -181,7 +180,7 @@ function analyzeStructureAndProcess() {
         return;
     }
 
-    // 2. Находим точное имя колонки ID, которое записано в этом файле
+    // 2. Находим точное имя колонки ID в файле
     const actualIdHeader = originalHeaders.find(c => {
         const low = c.toLowerCase();
         return low.includes('id объявления') || low.includes('id группы') || low === 'id';
@@ -211,21 +210,22 @@ function analyzeStructureAndProcess() {
         if (!title1 || title1 === '-' || title1.startsWith('---')) continue; 
 
         const title2 = rowMap[t2HeaderName] || '';
-        
-        // Теперь берем строго то имя ключа, которое нашли в заголовках файла
         const idValue = rowMap[actualIdHeader] || `no-id-${virtualIndex}`;
 
-        // СКЛЕЙКА ПО ID
-        if (!groupedData[idValue]) {
-            groupedData[idValue] = {
+        // ИСПРАВЛЕНИЕ: Ключ теперь уникален для комбинации ID + Заголовки.
+        // Это предотвратит схлопывание разных объявлений с одинаковым ID.
+        const uniqueGroupKey = `${idValue}_[T1:${title1}]_[T2:${title2}]`;
+
+        if (!groupedData[uniqueGroupKey]) {
+            groupedData[uniqueGroupKey] = {
                 realRowIndices: [i], 
                 title1: title1,
                 title2: title2,
                 rowMap: rowMap
             };
         } else {
-            // Если такой ID уже есть — просто дописываем индекс строки, не дублируя в таблицу
-            groupedData[idValue].realRowIndices.push(i);
+            // Сюда попадут только полные дубликаты (например, строки с разными ключевыми фразами одного объявления)
+            groupedData[uniqueGroupKey].realRowIndices.push(i);
         }
         virtualIndex++;
     }
