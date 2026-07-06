@@ -213,23 +213,31 @@ function analyzeStructureAndProcess() {
         const title2 = rowMap[t2HeaderName] || '';
         const idValue = rowMap[actualIdHeader] || `no-id-${virtualIndex}`;
 
-        // Проверяем, текстово-графическое ли это объявление
+        // Проверяем тип объявления ДО фильтрации пустых строк Заголовка 1
         const isTextGraphic = adType.includes('текстово-графическое') || adType === '';
 
         if (!isTextGraphic) {
-            // Для Комбинаторных и других типов объявлений делаем уникальный ключ, чтобы они не склеивались
+            // Комбинаторные и другие типы объявлений: сохраняем ОПУБЛИКОВАННЫЙ Заголовок 1 из блока Комбинаторики для превью, если основной пуст
+            let previewTitle = title1;
+            if (!previewTitle) {
+                // Пытаемся взять первый непустой заголовок из комбинаторики для отображения в столбце "Итоговый заголовок"
+                previewTitle = rowMap['Заголовок 1 (Комбинаторика)'] || rowMap['Заголовок 3'] || 'Комбинаторное объявление';
+            }
+
             const uniqueTypeKey = `special_${i}_${idValue}`;
             groupedData[uniqueTypeKey] = {
                 realRowIndices: [i],
                 title1: title1,
                 title2: title2,
+                combinedTitle: previewTitle, // Используем красивую заглушку/комбинаторный текст
                 rowMap: rowMap,
                 isSpecialType: true,
                 displayType: rowMap[typeHeaderName] || 'Другое'
             };
         } else {
-            // Стандартная склейка для Текстово-графических
+            // Стандартная фильтрация и склейка только для Текстово-графических
             if (!title1 || title1 === '-' || title1.startsWith('---')) continue; 
+            
             const uniqueGroupKey = `${idValue}_[T1:${title1}]_[T2:${title2}]`;
 
             if (!groupedData[uniqueGroupKey]) {
@@ -252,12 +260,11 @@ function analyzeStructureAndProcess() {
     Object.values(groupedData).forEach((group, index) => {
         let analyzedRow;
         if (group.isSpecialType) {
-            // Заглушка метрик для нетипичных объявлений
             analyzedRow = {
                 rowIndex: index,
                 t1: group.title1,
                 t2: group.title2,
-                combined: group.title1 || '—',
+                combined: group.combinedTitle, // Выводим подготовленный заголовок
                 isMerged: false,
                 length: 0,
                 overflow: 0,
