@@ -156,12 +156,17 @@ function handleFileSelect(event) {
 function analyzeStructureAndProcess() {
     let headerRowIndex = -1;
 
+    // 1. Ищем строку заголовков без привязки к регистру
     for (let i = 0; i < Math.min(rawExcelRows.length, 30); i++) {
         if (!rawExcelRows[i]) continue;
         const rowStr = rawExcelRows[i].map(cell => String(cell || '').trim());
         
-        const foundT1 = rowStr.indexOf(t1HeaderName);
-        const hasIdCol = rowStr.some(c => c.includes('ID объявления') || c.includes('ID группы') || c.toLowerCase() === 'id');
+        const foundT1 = rowStr.indexOf(t1HeaderName); // "Заголовок 1" ищем как есть
+        // Проверяем ID без учета регистра букв:
+        const hasIdCol = rowStr.some(c => {
+            const low = c.toLowerCase();
+            return low.includes('id объявления') || low.includes('id группы') || low === 'id';
+        });
 
         if (foundT1 !== -1 && hasIdCol) {
             headerRowIndex = i;
@@ -172,11 +177,15 @@ function analyzeStructureAndProcess() {
     }
 
     if (headerRowIndex === -1) {
-        alert("Не удалось найти строку заголовков с полем 'Заголовок 1'.");
+        alert("Не удалось найти строку заголовков с полем 'Заголовок 1' и колонкой ID.");
         return;
     }
 
-    const actualIdHeader = originalHeaders.find(c => c.includes('ID объявления') || c.includes('ID группы') || c.toLowerCase() === 'id') || idHeaderName;
+    // 2. Находим точное имя колонки ID, которое записано в этом файле
+    const actualIdHeader = originalHeaders.find(c => {
+        const low = c.toLowerCase();
+        return low.includes('id объявления') || low.includes('id группы') || low === 'id';
+    }) || idHeaderName;
 
     let startDataRow = headerRowIndex + 1;
     if (startDataRow < rawExcelRows.length && rawExcelRows[startDataRow]) {
@@ -186,7 +195,6 @@ function analyzeStructureAndProcess() {
         }
     }
 
-    // Временный объект для группировки дубликатов по ID объявления
     const groupedData = {};
     let virtualIndex = 0;
 
@@ -203,6 +211,8 @@ function analyzeStructureAndProcess() {
         if (!title1 || title1 === '-' || title1.startsWith('---')) continue; 
 
         const title2 = rowMap[t2HeaderName] || '';
+        
+        // Теперь берем строго то имя ключа, которое нашли в заголовках файла
         const idValue = rowMap[actualIdHeader] || `no-id-${virtualIndex}`;
 
         // СКЛЕЙКА ПО ID
@@ -214,6 +224,7 @@ function analyzeStructureAndProcess() {
                 rowMap: rowMap
             };
         } else {
+            // Если такой ID уже есть — просто дописываем индекс строки, не дублируя в таблицу
             groupedData[idValue].realRowIndices.push(i);
         }
         virtualIndex++;
