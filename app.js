@@ -156,12 +156,12 @@ function handleFileSelect(event) {
 function analyzeStructureAndProcess() {
     let headerRowIndex = -1;
 
-    // 1. Ищем строку заголовков без привязки к регистру
+    // 1. Ищем строку заголовков
     for (let i = 0; i < Math.min(rawExcelRows.length, 30); i++) {
         if (!rawExcelRows[i]) continue;
         const rowStr = rawExcelRows[i].map(cell => String(cell || '').trim());
         
-        const foundT1 = rowStr.indexOf(t1HeaderName); // "Заголовок 1" ищем как есть
+        const foundT1 = rowStr.indexOf(t1HeaderName); 
         const hasIdCol = rowStr.some(c => {
             const low = c.toLowerCase();
             return low.includes('id объявления') || low.includes('id группы') || low === 'id';
@@ -180,11 +180,13 @@ function analyzeStructureAndProcess() {
         return;
     }
 
-    // 2. Находим точное имя колонки ID в файле
+    // Находим имена ключевых колонок
     const actualIdHeader = originalHeaders.find(c => {
         const low = c.toLowerCase();
         return low.includes('id объявления') || low.includes('id группы') || low === 'id';
     }) || idHeaderName;
+
+    const typeHeaderName = originalHeaders.find(c => c.toLowerCase().includes('тип объявления')) || 'Тип объявления';
 
     let startDataRow = headerRowIndex + 1;
     if (startDataRow < rawExcelRows.length && rawExcelRows[startDataRow]) {
@@ -206,26 +208,41 @@ function analyzeStructureAndProcess() {
             rowMap[header] = row[colIdx] !== undefined ? String(row[colIdx]).trim() : '';
         });
 
+        const adType = (rowMap[typeHeaderName] || '').toLowerCase().trim();
         const title1 = rowMap[t1HeaderName] || '';
-        if (!title1 || title1 === '-' || title1.startsWith('---')) continue; 
-
         const title2 = rowMap[t2HeaderName] || '';
         const idValue = rowMap[actualIdHeader] || `no-id-${virtualIndex}`;
 
-        // ИСПРАВЛЕНИЕ: Ключ теперь уникален для комбинации ID + Заголовки.
-        // Это предотвратит схлопывание разных объявлений с одинаковым ID.
-        const uniqueGroupKey = `${idValue}_[T1:${title1}]_[T2:${title2}]`;
+        // Проверяем, текстово-графическое ли это объявление
+        const isTextGraphic = adType.includes('текстово-графическое') || adType === '';
 
-        if (!groupedData[uniqueGroupKey]) {
-            groupedData[uniqueGroupKey] = {
-                realRowIndices: [i], 
+        if (!isTextGraphic) {
+            // Для Комбинаторных и других типов объявлений делаем уникальный ключ, чтобы они не склеивались
+            const uniqueTypeKey = `special_${i}_${idValue}`;
+            groupedData[uniqueTypeKey] = {
+                realRowIndices: [i],
                 title1: title1,
                 title2: title2,
-                rowMap: rowMap
+                rowMap: rowMap,
+                isSpecialType: true,
+                displayType: rowMap[typeHeaderName] || 'Другое'
             };
         } else {
-            // Сюда попадут только полные дубликаты (например, строки с разными ключевыми фразами одного объявления)
-            groupedData[uniqueGroupKey].realRowIndices.push(i);
+            // Стандартная склейка для Текстово-графических
+            if (!title1 || title1 === '-' || title1.startsWith('---')) continue; 
+            const uniqueGroupKey = `${idValue}_[T1:${title1}]_[T2:${title2}]`;
+
+            if (!groupedData[uniqueGroupKey]) {
+                groupedData[uniqueGroupKey] = {
+                    realRowIndices: [i], 
+                    title1: title1,
+                    title2: title2,
+                    rowMap: rowMap,
+                    isSpecialType: false
+                };
+            } else {
+                groupedData[uniqueGroupKey].realRowIndices.push(i);
+            }
         }
         virtualIndex++;
     }
@@ -233,7 +250,28 @@ function analyzeStructureAndProcess() {
     processedDataset = [];
 
     Object.values(groupedData).forEach((group, index) => {
-        const analyzedRow = computeRowMetrics(index, group.title1, group.title2, group.rowMap);
+        let analyzedRow;
+        if (group.isSpecialType) {
+            // Заглушка метрик для нетипичных объявлений
+            analyzedRow = {
+                rowIndex: index,
+                t1: group.title1,
+                t2: group.title2,
+                combined: group.title1 || '—',
+                isMerged: false,
+                length: 0,
+                overflow: 0,
+                statusType: 'special-type',
+                statusWeight: 0,
+                utpReasons: [],
+                rowMap: group.rowMap,
+                isSpecialType: true,
+                displayType: group.displayType
+            };
+        } else {
+            analyzedRow = computeRowMetrics(index, group.title1, group.title2, group.rowMap);
+            analyzedRow.isSpecialType = false;
+        }
         analyzedRow.realRowIndices = group.realRowIndices; 
         processedDataset.push(analyzedRow);
     });
@@ -388,7 +426,7 @@ function renderFullTable() {
     let displayData = [...processedDataset];
     
     if (currentFilter === 'has-t2') {
-        displayData = displayData.filter(item => item.statusType !== 'no-t2');
+        displayData = displayData.filter(item => item.statusType !== 'no-t2' && !item.isSpecialType);
     } else if (currentFilter !== 'all') {
         displayData = displayData.filter(item => item.statusType === currentFilter);
     }
@@ -423,11 +461,15 @@ function renderFullTable() {
         let rowBgClass = '';
         let issueText = '—';
 
-        if (item.statusType === 'no-t2') {
+        // Рендер бейджей в зависимости от типа
+        if (item.isSpecialType) {
+            statusBadge = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-purple-50 text-purple-700 border border-purple-200"><i data-lucide="layers" class="w-3 h-3"></i> ${item.displayType}</span>`;
+            rowBgClass = 'bg-purple-50/5 hover:bg-purple-50/10';
+            issueText = '<span class="text-slate-400 text-xs">Не валидируется</span>';
+        } else if (item.statusType === 'no-t2') {
             statusBadge = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200"><i data-lucide="minus-circle" class="w-3 h-3"></i> Нет доп. заголовка</span>`;
-            rowBgClass = 'hover:bg-slate-50/80';
         } else if (item.statusType === 'lost-utp') {
-            statusBadge = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-bold bg-rose-50 text-rose-700 border border-rose-200"><i data-lucide="alert-circle" class="w-3 h-3"></i> Доп. заголовок будет отброшен</span>`;
+            statusBadge = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-bold bg-rose-50 text-rose-700 border border-rose-200"><i data-lucide="alert-circle" class="w-3 h-3"></i> Доп. заголовок отброшен</span>`;
             rowBgClass = 'bg-rose-50/10 hover:bg-rose-50/20';
             issueText = `<span class="text-rose-600 font-semibold text-xs">Теряет УТП: ${item.utpReasons.join(', ')}</span>`;
         } else if (item.statusType === 'lost-safe') {
@@ -439,13 +481,15 @@ function renderFullTable() {
 
         if (rowBgClass) tr.className = rowBgClass + " transition-colors group";
 
+        // Системные колонки нашей утилиты
         let rowHtml = `
-            <td class="p-3 sticky-col sticky left-0 z-10 border-r border-slate-200 shadow-[2px_0_5px_rgba(0,0,0,0.02)] status-cell bg-white group-hover:bg-slate-50">${statusBadge}</td>
-            <td class="p-3 sticky-col sticky left-[150px] z-10 border-r border-slate-200 shadow-[2px_0_5px_rgba(0,0,0,0.02)] font-medium text-slate-900 max-w-[200px] truncate tooltip-target cursor-help combined-cell bg-white group-hover:bg-slate-50" data-combined="${item.combined}">${formatTemplateText(item.combined)}</td>
-            <td class="p-3 sticky-col sticky left-[350px] z-10 border-r border-slate-200 text-center font-mono font-bold overflow-cell bg-white group-hover:bg-slate-50 ${item.overflow > 0 ? 'text-rose-600' : 'text-slate-300'}">${item.overflow > 0 ? `+${item.overflow}` : '0'}</td>
-            <td class="p-3 sticky-col sticky left-[460px] z-10 border-r border-slate-300 shadow-[3px_0_5px_rgba(0,0,0,0.04)] issue-cell bg-white group-hover:bg-slate-50">${issueText}</td>
+            <td class="p-3 sticky-col sticky left-0 z-10 border-r border-slate-200 shadow-[2px_0_5px_rgba(0,0,0,0.02)] status-cell bg-white group-hover:bg-inherit">${statusBadge}</td>
+            <td class="p-3 sticky-col sticky left-[150px] z-10 border-r border-slate-200 shadow-[2px_0_5px_rgba(0,0,0,0.02)] font-medium text-slate-900 max-w-[200px] truncate tooltip-target cursor-help combined-cell bg-white group-hover:bg-inherit" data-combined="${item.combined}">${item.isSpecialType ? item.combined : formatTemplateText(item.combined)}</td>
+            <td class="p-3 sticky-col sticky left-[350px] z-10 border-r border-slate-200 text-center font-mono font-bold overflow-cell bg-white group-hover:bg-inherit ${item.overflow > 0 ? 'text-rose-600' : 'text-slate-300'}">${item.isSpecialType ? '—' : (item.overflow > 0 ? `+${item.overflow}` : '0')}</td>
+            <td class="p-3 sticky-col sticky left-[460px] z-10 border-r border-slate-300 shadow-[3px_0_5px_rgba(0,0,0,0.04)] issue-cell bg-white group-hover:bg-inherit">${issueText}</td>
         `;
 
+        // Отрендерить вообще все оригинальные колонки (включая Комбинаторику)
         originalHeaders.forEach((headerName, curIdx) => {
             let displayValue = item.rowMap[headerName] || '';
             
@@ -456,31 +500,27 @@ function renderFullTable() {
             let editableAttr = "";
             let extraDataAttr = "";
 
-            if (lenIndices.includes(curIdx)) {
+            if (lenIndices.includes(curIdx) && !item.isSpecialType) {
                 cellStyle = "p-3 font-mono font-semibold text-center bg-slate-50/50 text-indigo-600 border-r border-slate-100 min-w-[70px]";
-                if (curIdx === lenIndices[0]) {
-                    displayValue = item.t1.length;
-                    extraDataAttr = `data-len-type="t1"`;
-                } else if (curIdx === lenIndices[1]) {
-                    displayValue = item.t2.length;
-                    extraDataAttr = `data-len-type="text2"`;
-                } else if (curIdx === lenIndices[2]) {
-                    displayValue = (item.rowMap[textHeaderName] || '').length;
-                    extraDataAttr = `data-len-type="text"`;
-                }
+                if (curIdx === lenIndices[0]) { displayValue = item.t1.length; extraDataAttr = `data-len-type="t1"`; }
+                else if (curIdx === lenIndices[1]) { displayValue = item.t2.length; extraDataAttr = `data-len-type="text2"`; }
+                else if (curIdx === lenIndices[2]) { displayValue = (item.rowMap[textHeaderName] || '').length; extraDataAttr = `data-len-type="text"`; }
             }
             
-            // Фиксируем стили и предотвращаем расползание редактируемых колонок
-            if (isT1) {
-                cellStyle = "p-3 bg-indigo-50/40 text-slate-900 font-medium editable-cell cursor-text border-r border-slate-100 min-w-[250px] max-w-[350px] whitespace-pre-wrap break-all";
-                editableAttr = `contenteditable="true" data-type="t1"`;
-            }
-            if (isT2) {
-                cellStyle = "p-3 bg-amber-50/30 text-slate-900 font-medium editable-cell cursor-text border-r border-slate-100 min-w-[250px] max-w-[350px] whitespace-pre-wrap break-all";
-                editableAttr = `contenteditable="true" data-type="t2"`;
+            // Разрешаем редактирование Т1 и Т2 только для текстово-графических объявлений
+            if (!item.isSpecialType) {
+                if (isT1) {
+                    cellStyle = "p-3 bg-indigo-50/40 text-slate-900 font-medium editable-cell cursor-text border-r border-slate-100 min-w-[250px] max-w-[350px] whitespace-pre-wrap break-all";
+                    editableAttr = `contenteditable="true" data-type="t1"`;
+                }
+                if (isT2) {
+                    cellStyle = "p-3 bg-amber-50/30 text-slate-900 font-medium editable-cell cursor-text border-r border-slate-100 min-w-[250px] max-w-[350px] whitespace-pre-wrap break-all";
+                    editableAttr = `contenteditable="true" data-type="t2"`;
+                }
             }
 
-            rowHtml += `<td class="${cellStyle}" ${editableAttr} ${extraDataAttr} title="${isT1 || isT2 ? 'Кликните для редактирования' : displayValue}">${isT1 || isT2 ? formatTemplateText(String(displayValue)) : displayValue}</td>`;
+            const valueToRender = (isT1 || isT2) && !item.isSpecialType ? formatTemplateText(String(displayValue)) : displayValue;
+            rowHtml += `<td class="${cellStyle}" ${editableAttr} ${extraDataAttr} title="${displayValue}">${valueToRender}</td>`;
         });
 
         tr.innerHTML = rowHtml;
