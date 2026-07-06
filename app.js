@@ -116,8 +116,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         renderFullTable();
     }
 });
-// ==========================================
 
+// ==========================================
+// ОБРАБОТКА И АНАЛИЗ ФАЙЛА
+// ==========================================
 function handleFileSelect(event) {
     const file = event.target.files[0];
     if (!file) return;
@@ -174,7 +176,6 @@ function analyzeStructureAndProcess() {
         return;
     }
 
-    // Определяем имя колонки ID динамически на основе найденных заголовков
     const actualIdHeader = originalHeaders.find(c => c.includes('ID объявления') || c.includes('ID группы') || c.toLowerCase() === 'id') || idHeaderName;
 
     let startDataRow = headerRowIndex + 1;
@@ -204,16 +205,15 @@ function analyzeStructureAndProcess() {
         const title2 = rowMap[t2HeaderName] || '';
         const idValue = rowMap[actualIdHeader] || `no-id-${virtualIndex}`;
 
-        // СКЛЕЙКА ПО ID: Если ID уже есть, мы пропускаем дубль (или можно дописать мерж текстов)
+        // СКЛЕЙКА ПО ID
         if (!groupedData[idValue]) {
             groupedData[idValue] = {
-                realRowIndices: [i], // Храним массив оригинальных индексов строк из Excel
+                realRowIndices: [i], 
                 title1: title1,
                 title2: title2,
                 rowMap: rowMap
             };
         } else {
-            // Запоминаем, что этот ID привязан ещё и к этой строке (нужно при экспорте обратно в Excel)
             groupedData[idValue].realRowIndices.push(i);
         }
         virtualIndex++;
@@ -221,10 +221,8 @@ function analyzeStructureAndProcess() {
 
     processedDataset = [];
 
-    // Превращаем сгруппированные данные в структурированный массив
     Object.values(groupedData).forEach((group, index) => {
         const analyzedRow = computeRowMetrics(index, group.title1, group.title2, group.rowMap);
-        // Дополнительно сохраняем массив оригинальных индексов строк
         analyzedRow.realRowIndices = group.realRowIndices; 
         processedDataset.push(analyzedRow);
     });
@@ -259,10 +257,8 @@ function computeRowMetrics(rowIndex, t1, t2, rowMap) {
         };
     }
 
-    // Правило Директа: если длина первого заголовка <= 56 символов, склеиваем через тире
     if (t1.length <= 56) {
         const potential = t1 + " — " + cleanTitle2;
-        // Максимальная суммарная длина Заголовок 1 + Заголовок 2 составляет 65 символов
         if (potential.length <= 65) {
             combinedTitle = potential;
             isMerged = true;
@@ -271,7 +267,6 @@ function computeRowMetrics(rowIndex, t1, t2, rowMap) {
             overflow = potential.length - 65;
         }
     } else {
-        // Если Заголовок 1 > 56, то Заголовок 2 гарантированно отбрасывается
         overflow = t1.length - 56;
     }
 
@@ -329,6 +324,9 @@ function updateDashboardStats() {
     document.getElementById('statLoss').innerText = loss;
 }
 
+// ==========================================
+// ОТРИСОВКА И ИНТЕРФЕЙС ТАБЛИЦЫ
+// ==========================================
 function buildTableHeader() {
     let html = `
         <th id="sortStatusBtn" class="py-4 px-4 bg-slate-100 text-slate-700 sticky left-0 z-30 border-r border-slate-200 shadow-[2px_0_5px_rgba(0,0,0,0.03)] min-w-[150px] cursor-pointer hover:bg-slate-200 transition-colors select-none">
@@ -431,10 +429,10 @@ function renderFullTable() {
         if (rowBgClass) tr.className = rowBgClass + " transition-colors group";
 
         let rowHtml = `
-            <td class="p-3 sticky-col sticky left-0 z-10 border-r border-slate-200 shadow-[2px_0_5px_rgba(0,0,0,0.02)] status-cell">${statusBadge}</td>
-            <td class="p-3 sticky-col sticky left-[150px] z-10 border-r border-slate-200 shadow-[2px_0_5px_rgba(0,0,0,0.02)] font-medium text-slate-900 max-w-[200px] truncate tooltip-target cursor-help combined-cell" data-combined="${item.combined}">${formatTemplateText(item.combined)}</td>
-            <td class="p-3 sticky-col sticky left-[350px] z-10 border-r border-slate-200 text-center font-mono font-bold overflow-cell ${item.overflow > 0 ? 'text-rose-600' : 'text-slate-300'}">${item.overflow > 0 ? `+${item.overflow}` : '0'}</td>
-            <td class="p-3 sticky-col sticky left-[460px] z-10 border-r border-slate-300 shadow-[3px_0_5px_rgba(0,0,0,0.04)] issue-cell">${issueText}</td>
+            <td class="p-3 sticky-col sticky left-0 z-10 border-r border-slate-200 shadow-[2px_0_5px_rgba(0,0,0,0.02)] status-cell bg-white group-hover:bg-slate-50">${statusBadge}</td>
+            <td class="p-3 sticky-col sticky left-[150px] z-10 border-r border-slate-200 shadow-[2px_0_5px_rgba(0,0,0,0.02)] font-medium text-slate-900 max-w-[200px] truncate tooltip-target cursor-help combined-cell bg-white group-hover:bg-slate-50" data-combined="${item.combined}">${formatTemplateText(item.combined)}</td>
+            <td class="p-3 sticky-col sticky left-[350px] z-10 border-r border-slate-200 text-center font-mono font-bold overflow-cell bg-white group-hover:bg-slate-50 ${item.overflow > 0 ? 'text-rose-600' : 'text-slate-300'}">${item.overflow > 0 ? `+${item.overflow}` : '0'}</td>
+            <td class="p-3 sticky-col sticky left-[460px] z-10 border-r border-slate-300 shadow-[3px_0_5px_rgba(0,0,0,0.04)] issue-cell bg-white group-hover:bg-slate-50">${issueText}</td>
         `;
 
         originalHeaders.forEach((headerName, curIdx) => {
@@ -443,12 +441,12 @@ function renderFullTable() {
             let isT1 = (headerName === t1HeaderName);
             let isT2 = (headerName === t2HeaderName);
             
-            let cellStyle = "p-3 text-slate-600 border-r border-slate-100 max-w-[250px] truncate";
+            let cellStyle = "p-3 text-slate-600 border-r border-slate-100 max-w-[250px] min-w-[150px] truncate";
             let editableAttr = "";
             let extraDataAttr = "";
 
             if (lenIndices.includes(curIdx)) {
-                cellStyle += " font-mono font-semibold text-center bg-slate-50/50 text-indigo-600";
+                cellStyle = "p-3 font-mono font-semibold text-center bg-slate-50/50 text-indigo-600 border-r border-slate-100 min-w-[70px]";
                 if (curIdx === lenIndices[0]) {
                     displayValue = item.t1.length;
                     extraDataAttr = `data-len-type="t1"`;
@@ -461,12 +459,13 @@ function renderFullTable() {
                 }
             }
             
+            // Фиксируем стили и предотвращаем расползание редактируемых колонок
             if (isT1) {
-                cellStyle += " bg-indigo-50/40 text-slate-900 font-medium editable-cell cursor-text";
+                cellStyle = "p-3 bg-indigo-50/40 text-slate-900 font-medium editable-cell cursor-text border-r border-slate-100 min-w-[250px] max-w-[350px] whitespace-pre-wrap break-all";
                 editableAttr = `contenteditable="true" data-type="t1"`;
             }
             if (isT2) {
-                cellStyle += " bg-amber-50/30 text-slate-900 font-medium editable-cell cursor-text";
+                cellStyle = "p-3 bg-amber-50/30 text-slate-900 font-medium editable-cell cursor-text border-r border-slate-100 min-w-[250px] max-w-[350px] whitespace-pre-wrap break-all";
                 editableAttr = `contenteditable="true" data-type="t2"`;
             }
 
@@ -479,6 +478,7 @@ function renderFullTable() {
 
     lucide.createIcons();
     initTooltipEvents();
+    initInlineEditingEvents(); 
 }
 
 function initTooltipEvents() {
@@ -512,14 +512,16 @@ function initTooltipEvents() {
     });
 }
 
-// РЕАКТИВНОЕ ОБНОВЛЕНИЕ ТАБЛИЦЫ «НА ЛЕТУ» (INPUT + FOCUS + BLUR)
+// ==========================================
+// РЕАКТИВНОЕ ИНЛАЙН-РЕДАКТИРОВАНИЕ
+// ==========================================
 function initInlineEditingEvents() {
     const cells = tableBody.querySelectorAll('.editable-cell');
     cells.forEach(cell => {
         
         cell.addEventListener('input', function(e) {
             const editType = cell.getAttribute('data-type');
-            const text = cell.innerText; // Не делаем трим при вводе, чтобы не ломать пробелы
+            const text = cell.innerText; 
             const len = text.length;
 
             const tr = cell.closest('tr');
@@ -535,26 +537,22 @@ function initInlineEditingEvents() {
                     dataItem.rowMap[t2HeaderName] = text;
                 }
 
-                // Пересчитываем расчетные метрики строки в реальном времени
                 const updatedMetrics = computeRowMetrics(rowIndex, dataItem.t1, dataItem.t2, dataItem.rowMap);
                 Object.assign(dataItem, updatedMetrics);
 
-                // Корректируем итоговую склеенную ячейку
                 const combinedCell = tr.querySelector('.combined-cell');
                 if (combinedCell) {
                     combinedCell.innerHTML = formatTemplateText(dataItem.combined);
                     combinedCell.setAttribute('data-combined', dataItem.combined);
                 }
 
-                // Корректируем ячейку превышения лимита
                 const overflowCell = tr.querySelector('.overflow-cell');
                 if (overflowCell) {
                     overflowCell.innerText = dataItem.overflow > 0 ? `+${dataItem.overflow}` : '0';
-                    overflowCell.className = `p-3 sticky-col sticky left-[350px] z-10 border-r border-slate-200 text-center font-mono font-bold ${dataItem.overflow > 0 ? 'text-rose-600' : 'text-slate-300'}`;
+                    overflowCell.className = `p-3 sticky-col sticky left-[350px] z-10 border-r border-slate-200 text-center font-mono font-bold bg-white group-hover:bg-slate-50 ${dataItem.overflow > 0 ? 'text-rose-600' : 'text-slate-300'}`;
                 }
             }
 
-            // Рендер живого счетчика символов у курсора
             const rect = cell.getBoundingClientRect();
             liveCounter.style.left = `${rect.left + window.scrollX}px`;
             liveCounter.style.top = `${rect.top + window.scrollY - 28}px`;
@@ -566,11 +564,10 @@ function initInlineEditingEvents() {
                 liveCounter.className = "fixed z-50 bg-slate-900 text-white px-2.5 py-1 text-xs font-mono rounded-md shadow-lg pointer-events-none font-bold";
             }
 
-            // Синхронизируем внутренние служебные колонки длин, если они отрисованы
             if (editType === 't1') {
                 const lenT1Cell = tr.querySelector('td[data-len-type="t1"]');
                 if (lenT1Cell) lenT1Cell.innerText = len;
-            } else if (editType === 'text2') {
+            } else if (editType === 't2') { 
                 const lenT2Cell = tr.querySelector('td[data-len-type="text2"]');
                 if (lenT2Cell) lenT2Cell.innerText = len;
             }
@@ -599,7 +596,6 @@ function initInlineEditingEvents() {
             const dataItem = processedDataset.find(item => item.rowIndex === rowIndex);
             if (!dataItem) return;
 
-            // Финальный trim() производим только при расфокусировке ячейки
             const finalCleanText = cell.innerText.trim();
             if (cell.getAttribute('data-type') === 't1') {
                 dataItem.t1 = finalCleanText;
@@ -626,7 +622,7 @@ function initInlineEditingEvents() {
             
             if (overflowCell) {
                 overflowCell.innerText = dataItem.overflow > 0 ? `+${dataItem.overflow}` : '0';
-                overflowCell.className = `p-3 sticky-col sticky left-[350px] z-10 border-r border-slate-200 text-center font-mono font-bold ${dataItem.overflow > 0 ? 'text-rose-600' : 'text-slate-300'}`;
+                overflowCell.className = `p-3 sticky-col sticky left-[350px] z-10 border-r border-slate-200 text-center font-mono font-bold bg-white group-hover:bg-slate-50 ${dataItem.overflow > 0 ? 'text-rose-600' : 'text-slate-300'}`;
             }
 
             const lenT1Cell = tr.querySelector('td[data-len-type="t1"]');
@@ -635,7 +631,6 @@ function initInlineEditingEvents() {
             const lenT2Cell = tr.querySelector('td[data-len-type="text2"]');
             if (lenT2Cell) lenT2Cell.innerText = dataItem.t2.length;
 
-            // Смена цветовых статусов строки и текста ошибок только при blur (чтобы не дергать UX)
             if (dataItem.statusType === 'no-t2') {
                 statusCell.innerHTML = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200"><i data-lucide="minus-circle" class="w-3 h-3"></i> Нет доп. заголовка</span>`;
                 issueCell.innerHTML = '—';
@@ -669,7 +664,9 @@ function initInlineEditingEvents() {
     });
 }
 
-// ВЫГРУЗКА ИСПРАВЛЕННОГО XLSX С УЧЕТОМ СВЯЗАННЫХ ОРИГИНАЛЬНЫХ СТРОК И ДУБЛИКАТОВ
+// ==========================================
+// ВЫГРУЗКА ИСПРАВЛЕННОГО XLSX (РАЗВЕРТЫВАНИЕ)
+// ==========================================
 function downloadUpdatedXLSX() {
     if (processedDataset.length === 0) return;
 
@@ -683,7 +680,7 @@ function downloadUpdatedXLSX() {
     const lenIndices = (textColIdx !== -1) ? [textColIdx + 1, textColIdx + 2, textColIdx + 3] : [];
 
     processedDataset.forEach(item => {
-        // Мы разворачиваем обратно склеенные элементы на все строки-дубликаты, которые были найдены
+        // Разворачиваем склеенные по ID элементы обратно во все строки-дубликаты
         item.realRowIndices.forEach(() => {
             const singleRowArray = [];
             originalHeaders.forEach((headerName, curIdx) => {
