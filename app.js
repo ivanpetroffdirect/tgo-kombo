@@ -9,11 +9,16 @@ let sortDirection = 'none';
 let outputFileName = 'compiled_campaign.xlsx';
 let selectedRowIndices = []; // Массив для хранения rowIndex выбранных объявлений
 
-// Хранилище связей индексов
+// Хранилище базовых названий и точных индексов в шапке
 let t1HeaderName = 'Заголовок 1';
 let t2HeaderName = 'Заголовок 2';
 let textHeaderName = 'Текст';
 let headerRowGlobalIndex = -1;
+
+// Индексы базовых полей (определяются при парсинге)
+let baseT1Idx = -1;
+let baseT2Idx = -1;
+let baseTextIdx = -1;
 
 const fileInput = document.getElementById('excelFile');
 const uploadText = document.getElementById('uploadText');
@@ -28,7 +33,6 @@ fileInput.addEventListener('change', handleFileSelect);
 downloadFileBtn.addEventListener('click', downloadUpdatedXLSX);
 searchInput.addEventListener('input', (e) => { searchQuery = e.target.value.toLowerCase().trim(); renderFullTable(); });
 
-// Вешаем клик на кнопку массового изменения
 const applyBulkBtn = document.getElementById('applyBulkBtn');
 if (applyBulkBtn) {
     applyBulkBtn.addEventListener('click', applyBulkEdit);
@@ -80,7 +84,7 @@ function handleFileSelect(event) {
         }
 
         selectedRowIndices = [];
-        toggleBulkPanel();
+        if (typeof toggleBulkPanel === 'function') toggleBulkPanel();
 
         analyzeStructureAndProcess();
         downloadFileBtn.removeAttribute('disabled');
@@ -92,6 +96,7 @@ function handleFileSelect(event) {
 function analyzeStructureAndProcess() {
     let headerRowIndex = -1;
 
+    // Ищем строку заголовков (шапку ТГО)
     for (let i = 0; i < Math.min(rawExcelRows.length, 30); i++) {
         if (!rawExcelRows[i]) continue;
         const rowStr = rawExcelRows[i].map(cell => String(cell || '').trim());
@@ -112,6 +117,11 @@ function analyzeStructureAndProcess() {
         return;
     }
 
+    // Определяем точные индексы ПЕРВЫХ (базовых) полей ТГО
+    baseT1Idx = originalHeaders.indexOf(t1HeaderName);
+    baseT2Idx = originalHeaders.indexOf(t2HeaderName);
+    baseTextIdx = originalHeaders.indexOf(textHeaderName);
+
     let startDataRow = headerRowIndex + 1;
     if (startDataRow < rawExcelRows.length && rawExcelRows[startDataRow]) {
         const checkRow = rawExcelRows[startDataRow].map(c => String(c || '').toLowerCase().trim());
@@ -126,18 +136,19 @@ function analyzeStructureAndProcess() {
         const row = rawExcelRows[i];
         if (!row || row.length === 0) continue;
 
+        // Сохраняем значения по индексам, чтобы избежать конфликтов дублирующихся имен в rowMap
         const rowMap = {};
         originalHeaders.forEach((header, colIdx) => {
-            rowMap[header] = row[colIdx] !== undefined ? String(row[colIdx]).trim() : '';
+            // Создаем уникальный ключ для каждого столбца "ИмяСтолбца_Индекс"
+            let uniqueKey = `${header || 'Пусто'}_${colIdx}`;
+            rowMap[uniqueKey] = row[colIdx] !== undefined ? String(row[colIdx]).trim() : '';
         });
 
-        const hasIdOrGroup = originalHeaders.some(h => (h.includes('ID') || h.includes('Название группы') || h.includes('Тип объявления')) && rowMap[h]);
-        if (!hasIdOrGroup && (!rowMap[t1HeaderName] || rowMap[t1HeaderName] === '-')) continue;
-
-        let title1 = rowMap[t1HeaderName] || '';
+        // Проверка на заполненность строки
+        let title1 = row[baseT1Idx] !== undefined ? String(row[baseT1Idx]).trim() : '';
         if (title1 === '-' || title1.startsWith('---')) title1 = '';
 
-        const title2 = rowMap[t2HeaderName] || '';
+        let title2 = row[baseT2Idx] !== undefined ? String(row[baseT2Idx]).trim() : '';
         
         const analyzedRow = computeRowMetrics(i, title1, title2, rowMap);
         processedDataset.push(analyzedRow);
@@ -320,10 +331,10 @@ function applyBulkEdit() {
 
         if (fieldType === 't1') {
             dataItem.t1 = newValue;
-            dataItem.rowMap[t1HeaderName] = newValue;
+            dataItem.rowMap[`${t1HeaderName}_${baseT1Idx}`] = newValue;
         } else if (fieldType === 't2') {
             dataItem.t2 = newValue;
-            dataItem.rowMap[t2HeaderName] = newValue;
+            dataItem.rowMap[`${t2HeaderName}_${baseT2Idx}`] = newValue;
         }
 
         const updatedMetrics = computeRowMetrics(rowIndex, dataItem.t1, dataItem.t2, dataItem.rowMap);
@@ -398,8 +409,8 @@ function renderFullTable() {
         selectAllCheck.checked = allPageRowsChecked;
     }
 
-    const textColIdx = originalHeaders.indexOf(textHeaderName);
-    const tgoLenIndices = (textColIdx !== -1) ? [textColIdx + 1, textColIdx + 2, textColIdx + 3] : [];
+    // Определяем блок индексов для длин ТГО
+    const tgoLenIndices = (baseTextIdx !== -1) ? [baseTextIdx + 1, baseTextIdx + 2, baseTextIdx + 3] : [];
 
     displayData.forEach(item => {
         const tr = document.createElement('tr');
@@ -440,16 +451,18 @@ function renderFullTable() {
         `;
 
         originalHeaders.forEach((headerName, curIdx) => {
-            let displayValue = item.rowMap[headerName] || '';
+            let uniqueKey = `${headerName || 'Пусто'}_${curIdx}`;
+            let displayValue = item.rowMap[uniqueKey] || '';
             let headerLower = headerName.toLowerCase().trim();
             
-            let isT1 = (headerName === t1HeaderName);
-            let isT2 = (headerName === t2HeaderName);
+            // Жёстко разделяем базовые поля и комбинаторику по индексам
+            let isT1 = (curIdx === baseT1Idx);
+            let isT2 = (curIdx === baseT2Idx);
             
-            // ИСПРАВЛЕННОЕ УСЛОВИЕ: Любые столбцы со словами Заголовок/Текст, кроме базовых ТГО и полей длин
-            let isCombText = (headerLower.includes('заголовок') || headerLower.includes('текст')) && 
-                             !headerLower.includes('длина') && !headerLower.startsWith('дл.') &&
-                             headerName !== t1HeaderName && headerName !== t2HeaderName && headerName !== textHeaderName;
+            // Если индекс дальше базовых полей И название содержит Заголовок/Текст (но не является колонкой длины)
+            let isCombText = (curIdx > baseTextIdx) && 
+                             (headerLower.includes('заголовок') || headerLower.includes('текст')) && 
+                             !headerLower.includes('длина') && !headerLower.startsWith('дл.');
 
             let isLengthCol = tgoLenIndices.includes(curIdx) || headerLower.includes('длина') || headerLower.startsWith('дл.');
 
@@ -467,30 +480,37 @@ function renderFullTable() {
                     displayValue = item.t2.length;
                     extraDataAttr = `data-len-type="text2"`;
                 } else if (curIdx === tgoLenIndices[2]) {
-                    displayValue = (item.rowMap[textHeaderName] || '').length;
+                    let baseTextKey = `${textHeaderName}_${baseTextIdx}`;
+                    displayValue = (item.rowMap[baseTextKey] || '').length;
                     extraDataAttr = `data-len-type="text"`;
                 } else {
-                    // Прямая связка комбинаторной ячейки длины с её текстом
-                    let textHeaderKey = originalHeaders.find(h => headerLower.includes(h.toLowerCase().trim()) && h !== headerName);
-                    if (!textHeaderKey) {
-                        let m = headerName.match(/\d+/);
-                        let type = headerLower.includes('заг') ? 'Заголовок' : 'Текст';
-                        textHeaderKey = m ? `${type} ${m[0]}` : '';
+                    // Для комбинаторных длин ищем соответствующую текстовую ячейку слева по имени
+                    // (Например, у нас колонка "Длина заголовка 1", значит ищем "Заголовок 1", который идёт в блоке комбинаторики)
+                    let targetTextIdx = originalHeaders.findIndex((h, hIdx) => {
+                        if (hIdx <= baseTextIdx) return false; // Пропускаем базовые
+                        let hLower = h.toLowerCase().trim();
+                        return headerLower.includes(hLower) && hIdx !== curIdx;
+                    });
+
+                    if (targetTextIdx !== -1) {
+                        let targetKey = `${originalHeaders[targetTextIdx]}_${targetTextIdx}`;
+                        displayValue = (item.rowMap[targetKey] || '').length;
+                        extraDataAttr = `data-len-type="comb-len" data-source-field="${originalHeaders[targetTextIdx]}_${targetTextIdx}"`;
+                    } else {
+                        displayValue = '0';
                     }
-                    displayValue = (item.rowMap[textHeaderKey] || '').length;
-                    extraDataAttr = `data-len-type="comb-len" data-source-field="${textHeaderKey}"`;
                 }
             }
             
             if (isT1) {
                 cellStyle += " bg-indigo-50/40 text-slate-900 font-medium editable-cell cursor-text";
-                editableAttr = `contenteditable="true" data-type="t1" data-field-name="${headerName}"`;
+                editableAttr = `contenteditable="true" data-type="t1" data-field-key="${uniqueKey}"`;
             } else if (isT2) {
                 cellStyle += " bg-amber-50/30 text-slate-900 font-medium editable-cell cursor-text";
-                editableAttr = `contenteditable="true" data-type="t2" data-field-name="${headerName}"`;
+                editableAttr = `contenteditable="true" data-type="t2" data-field-key="${uniqueKey}"`;
             } else if (isCombText) {
                 cellStyle += " bg-slate-50/60 text-slate-900 font-medium editable-cell cursor-text border-dashed border-b border-slate-300";
-                editableAttr = `contenteditable="true" data-type="comb-text" data-field-name="${headerName}"`;
+                editableAttr = `contenteditable="true" data-type="comb-text" data-field-key="${uniqueKey}"`;
             }
 
             let showTooltip = isT1 || isT2 || isCombText ? 'Кликните для редактирования' : displayValue;
@@ -514,7 +534,7 @@ function initInlineEditingEvents() {
         
         cell.addEventListener('input', function(e) {
             const editType = cell.getAttribute('data-type');
-            const fieldName = cell.getAttribute('data-field-name');
+            const fieldKey = cell.getAttribute('data-field-key');
             const text = cell.innerText;
             const len = text.length;
 
@@ -523,7 +543,7 @@ function initInlineEditingEvents() {
             liveCounter.style.top = `${rect.top + window.scrollY - 28}px`;
             liveCounter.innerText = `Длина: ${len} симв.`;
             
-            if ((editType === 't1' || fieldName.toLowerCase().includes('заголовок')) && len > 56) {
+            if ((editType === 't1' || fieldKey.toLowerCase().includes('заголовок')) && len > 56) {
                 liveCounter.className = "fixed z-50 bg-rose-600 text-white px-2.5 py-1 text-xs font-mono rounded-md shadow-lg pointer-events-none font-bold";
             } else {
                 liveCounter.className = "fixed z-50 bg-slate-900 text-white px-2.5 py-1 text-xs font-mono rounded-md shadow-lg pointer-events-none font-bold";
@@ -538,8 +558,8 @@ function initInlineEditingEvents() {
                 const lenT2Cell = tr.querySelector('td[data-len-type="text2"]');
                 if (lenT2Cell) lenT2Cell.innerText = len;
             } else if (editType === 'comb-text') {
-                // ИСПРАВЛЕННЫЙ ПОИСК: Находим ячейку длины на экране по дата-атрибуту связанного поля
-                const lenCombCell = tr.querySelector(`td[data-source-field="${fieldName}"]`);
+                // Связываем изменение комбинаторного текста с его ячейкой длины
+                const lenCombCell = tr.querySelector(`td[data-source-field="${fieldKey}"]`);
                 if (lenCombCell) lenCombCell.innerText = len;
             }
         });
@@ -547,13 +567,13 @@ function initInlineEditingEvents() {
         cell.addEventListener('focus', function(e) {
             const rowIndex = parseInt(cell.closest('tr').getAttribute('data-row-index'));
             const editType = cell.getAttribute('data-type');
-            const fieldName = cell.getAttribute('data-field-name');
+            const fieldKey = cell.getAttribute('data-field-key');
             const dataItem = processedDataset.find(item => item.rowIndex === rowIndex);
             
             if (dataItem) {
                 if (editType === 't1') cell.innerText = dataItem.t1;
                 else if (editType === 't2') cell.innerText = dataItem.t2;
-                else cell.innerText = dataItem.rowMap[fieldName] || '';
+                else cell.innerText = dataItem.rowMap[fieldKey] || '';
             }
 
             liveCounter.innerText = `Длина: ${cell.innerText.length} симв.`;
@@ -569,7 +589,7 @@ function initInlineEditingEvents() {
             const tr = cell.closest('tr');
             const rowIndex = parseInt(tr.getAttribute('data-row-index'));
             const editType = cell.getAttribute('data-type');
-            const fieldName = cell.getAttribute('data-field-name');
+            const fieldKey = cell.getAttribute('data-field-key');
             const newText = cell.innerText.trim();
 
             const dataItem = processedDataset.find(item => item.rowIndex === rowIndex);
@@ -577,12 +597,12 @@ function initInlineEditingEvents() {
 
             if (editType === 't1') {
                 dataItem.t1 = newText;
-                dataItem.rowMap[t1HeaderName] = newText;
+                dataItem.rowMap[`${t1HeaderName}_${baseT1Idx}`] = newText;
             } else if (editType === 't2') {
                 dataItem.t2 = newText;
-                dataItem.rowMap[t2HeaderName] = newText;
+                dataItem.rowMap[`${t2HeaderName}_${baseT2Idx}`] = newText;
             } else {
-                dataItem.rowMap[fieldName] = newText;
+                dataItem.rowMap[fieldKey] = newText;
             }
 
             const updatedMetrics = computeRowMetrics(rowIndex, dataItem.t1, dataItem.t2, dataItem.rowMap);
@@ -653,28 +673,31 @@ function downloadUpdatedXLSX() {
         exportRows.push(rawExcelRows[i]);
     }
 
-    const textColIdx = originalHeaders.indexOf(textHeaderName);
-    const tgoLenIndices = (textColIdx !== -1) ? [textColIdx + 1, textColIdx + 2, textColIdx + 3] : [];
+    const tgoLenIndices = (baseTextIdx !== -1) ? [baseTextIdx + 1, baseTextIdx + 2, baseTextIdx + 3] : [];
 
     processedDataset.forEach(item => {
         const singleRowArray = [];
         originalHeaders.forEach((headerName, curIdx) => {
-            let val = item.rowMap[headerName] || '';
+            let uniqueKey = `${headerName || 'Пусто'}_${curIdx}`;
+            let val = item.rowMap[uniqueKey] || '';
             let headerLower = headerName.toLowerCase().trim();
             
+            // Вычисляем длины на лету при экспорте
             if (tgoLenIndices.includes(curIdx)) {
                 if (curIdx === tgoLenIndices[0]) val = item.t1.length;
                 else if (curIdx === tgoLenIndices[1]) val = item.t2.length;
-                else if (curIdx === tgoLenIndices[2]) val = (item.rowMap[textHeaderName] || '').length;
-            } else if (headerLower.includes('длина') || headerLower.startsWith('дл.')) {
-                let textHeaderKey = originalHeaders.find(h => headerLower.includes(h.toLowerCase().trim()) && h !== headerName);
-                if (!textHeaderKey) {
-                    let m = headerName.match(/\d+/);
-                    let type = headerLower.includes('заг') ? 'Заголовок' : 'Текст';
-                    textHeaderKey = m ? `${type} ${m[0]}` : '';
+                else if (curIdx === tgoLenIndices[2]) {
+                    let baseTextKey = `${textHeaderName}_${baseTextIdx}`;
+                    val = (item.rowMap[baseTextKey] || '').length;
                 }
-                if (textHeaderKey && item.rowMap[textHeaderKey] !== undefined) {
-                    val = item.rowMap[textHeaderKey].length;
+            } else if (headerLower.includes('длина') || headerLower.startsWith('дл.')) {
+                let targetTextIdx = originalHeaders.findIndex((h, hIdx) => {
+                    if (hIdx <= baseTextIdx) return false;
+                    return headerLower.includes(h.toLowerCase().trim()) && hIdx !== curIdx;
+                });
+                if (targetTextIdx !== -1) {
+                    let targetKey = `${originalHeaders[targetTextIdx]}_${targetTextIdx}`;
+                    val = (item.rowMap[targetKey] || '').length;
                 }
             }
             
