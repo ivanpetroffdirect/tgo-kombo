@@ -7,6 +7,7 @@ let currentFilter = 'all';
 let searchQuery = '';
 let sortDirection = 'none'; 
 let outputFileName = 'compiled_campaign.xlsx';
+let selectedRowIndices = []; // Массив для хранения rowIndex выбранных объявлений
 
 // Хранилище связей индексов
 let t1HeaderName = 'Заголовок 1';
@@ -26,6 +27,12 @@ const liveCounter = document.getElementById('liveCharCounter');
 fileInput.addEventListener('change', handleFileSelect);
 downloadFileBtn.addEventListener('click', downloadUpdatedXLSX);
 searchInput.addEventListener('input', (e) => { searchQuery = e.target.value.toLowerCase().trim(); renderFullTable(); });
+
+// Вешаем клик на кнопку массового изменения
+const applyBulkBtn = document.getElementById('applyBulkBtn');
+if (applyBulkBtn) {
+    applyBulkBtn.addEventListener('click', applyBulkEdit);
+}
 
 filterBtns.forEach(btn => {
     btn.addEventListener('click', (e) => {
@@ -75,6 +82,10 @@ function handleFileSelect(event) {
             alert("Файл пуст или не удалось распознать структуру.");
             return;
         }
+
+        // При новой загрузке сбрасываем выбранные чекбоксы
+        selectedRowIndices = [];
+        toggleBulkPanel();
 
         analyzeStructureAndProcess();
         downloadFileBtn.removeAttribute('disabled');
@@ -216,14 +227,17 @@ function updateDashboardStats() {
 
 function buildTableHeader() {
     let html = `
-        <th id="sortStatusBtn" class="py-4 px-4 bg-slate-100 text-slate-700 sticky left-0 z-30 border-r border-slate-200 shadow-[2px_0_5px_rgba(0,0,0,0.03)] min-w-[150px] cursor-pointer hover:bg-slate-200 transition-colors select-none">
+        <th class="py-4 px-4 bg-slate-100 text-slate-700 sticky left-0 z-40 border-r border-slate-200 w-12 text-center">
+            <input type="checkbox" id="selectAllCheckbox" class="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer">
+        </th>
+        <th id="sortStatusBtn" class="py-4 px-4 bg-slate-100 text-slate-700 sticky left-[48px] z-30 border-r border-slate-200 shadow-[2px_0_5px_rgba(0,0,0,0.03)] min-w-[150px] cursor-pointer hover:bg-slate-200 transition-colors select-none">
             <div class="flex items-center gap-1.5">
                 Статус переноса <span id="sortIndicator" class="text-indigo-600 font-mono text-xs">↕</span>
             </div>
         </th>
-        <th class="py-4 px-4 bg-slate-100 text-slate-700 sticky left-[150px] z-30 border-r border-slate-200 min-w-[200px]">Итоговый заголовок</th>
-        <th class="py-4 px-4 bg-slate-100 text-slate-700 sticky left-[350px] z-30 border-r border-slate-200 text-center min-w-[110px]">Превышение</th>
-        <th class="py-4 px-4 bg-slate-100 text-slate-700 sticky left-[460px] z-30 border-r border-slate-300 shadow-[3px_0_5px_rgba(0,0,0,0.05)] min-w-[150px]">Проблемы</th>
+        <th class="py-4 px-4 bg-slate-100 text-slate-700 sticky left-[198px] z-30 border-r border-slate-200 min-w-[200px]">Итоговый заголовок</th>
+        <th class="py-4 px-4 bg-slate-100 text-slate-700 sticky left-[398px] z-30 border-r border-slate-200 text-center min-w-[110px]">Превышение</th>
+        <th class="py-4 px-4 bg-slate-100 text-slate-700 sticky left-[508px] z-30 border-r border-slate-300 shadow-[3px_0_5px_rgba(0,0,0,0.05)] min-w-[150px]">Проблемы</th>
     `;
 
     originalHeaders.forEach(header => {
@@ -232,7 +246,95 @@ function buildTableHeader() {
 
     tableHeaderRow.innerHTML = html;
     document.getElementById('sortStatusBtn').addEventListener('click', toggleSort);
+    
+    const selectAllCheck = document.getElementById('selectAllCheckbox');
+    if (selectAllCheck) {
+        selectAllCheck.addEventListener('change', handleSelectAll);
+    }
+    
     updateSortIndicator();
+}
+
+function handleSelectAll(e) {
+    const isChecked = e.target.checked;
+    const visibleCheckboxes = tableBody.querySelectorAll('.row-checkbox');
+    
+    visibleCheckboxes.forEach(cb => {
+        cb.checked = isChecked;
+        const rIdx = parseInt(cb.getAttribute('data-row-index'));
+        
+        if (isChecked) {
+            if (!selectedRowIndices.includes(rIdx)) selectedRowIndices.push(rIdx);
+        } else {
+            selectedRowIndices = selectedRowIndices.filter(id => id !== rIdx);
+        }
+    });
+    
+    toggleBulkPanel();
+}
+
+function initCheckboxEvents() {
+    const checkboxes = tableBody.querySelectorAll('.row-checkbox');
+    checkboxes.forEach(cb => {
+        cb.addEventListener('change', function() {
+            const rIdx = parseInt(this.getAttribute('data-row-index'));
+            if (this.checked) {
+                if (!selectedRowIndices.includes(rIdx)) selectedRowIndices.push(rIdx);
+            } else {
+                selectedRowIndices = selectedRowIndices.filter(id => id !== rIdx);
+                const selectAll = document.getElementById('selectAllCheckbox');
+                if (selectAll) selectAll.checked = false;
+            }
+            toggleBulkPanel();
+        });
+    });
+}
+
+function toggleBulkPanel() {
+    const panel = document.getElementById('bulkActionPanel');
+    const countEl = document.getElementById('bulkSelectedCount');
+    if (!panel) return;
+
+    if (selectedRowIndices.length > 0) {
+        panel.classList.remove('hidden');
+        if (countEl) countEl.innerText = selectedRowIndices.length;
+    } else {
+        panel.classList.add('hidden');
+        const selectAll = document.getElementById('selectAllCheckbox');
+        if (selectAll) selectAll.checked = false;
+    }
+}
+
+function applyBulkEdit() {
+    const fieldType = document.getElementById('bulkFieldSelect').value; 
+    const newValue = document.getElementById('bulkInputText').value.trim();
+
+    if (selectedRowIndices.length === 0) return;
+    
+    if (!confirm(`Вы уверены, что хотите изменить поле для ${selectedRowIndices.length} объявлений?`)) return;
+
+    selectedRowIndices.forEach(rowIndex => {
+        const dataItem = processedDataset.find(item => item.rowIndex === rowIndex);
+        if (!dataItem) return;
+
+        if (fieldType === 't1') {
+            dataItem.t1 = newValue;
+            dataItem.rowMap[t1HeaderName] = newValue;
+        } else if (fieldType === 't2') {
+            dataItem.t2 = newValue;
+            dataItem.rowMap[t2HeaderName] = newValue;
+        }
+
+        const updatedMetrics = computeRowMetrics(rowIndex, dataItem.t1, dataItem.t2, dataItem.rowMap);
+        Object.assign(dataItem, updatedMetrics);
+    });
+
+    selectedRowIndices = [];
+    document.getElementById('bulkInputText').value = '';
+    
+    updateDashboardStats();
+    renderFullTable();
+    toggleBulkPanel();
 }
 
 function toggleSort() {
@@ -280,8 +382,16 @@ function renderFullTable() {
     document.getElementById('tableCounter').innerText = `Строк: ${displayData.length}`;
 
     if (displayData.length === 0) {
-        tableBody.innerHTML = `<tr><td colspan="${originalHeaders.length + 4}" class="py-12 text-center text-slate-400">Ничего не найдено.</td></tr>`;
+        tableBody.innerHTML = `<tr><td colspan="${originalHeaders.length + 5}" class="py-12 text-center text-slate-400">Ничего не найдено.</td></tr>`;
         return;
+    }
+
+    // Синхронизируем главный чекбокс шапки: если отфильтровали, и ничего не выбрано — снимаем галочку
+    const selectAllCheck = document.getElementById('selectAllCheckbox');
+    if (selectAllCheck) {
+        const pageRowIds = displayData.map(d => d.rowIndex);
+        const allPageRowsChecked = pageRowIds.length > 0 && pageRowIds.every(id => selectedRowIndices.includes(id));
+        selectAllCheck.checked = allPageRowsChecked;
     }
 
     const textColIdx = originalHeaders.indexOf(textHeaderName);
@@ -309,11 +419,16 @@ function renderFullTable() {
 
         if (rowBgClass) tr.className = rowBgClass;
 
+        const isChecked = selectedRowIndices.includes(item.rowIndex);
+
         let rowHtml = `
-            <td class="p-3 sticky-col sticky left-0 z-10 border-r border-slate-200 shadow-[2px_0_5px_rgba(0,0,0,0.02)]">${statusBadge}</td>
-            <td class="p-3 sticky-col sticky left-[150px] z-10 border-r border-slate-200 shadow-[2px_0_5px_rgba(0,0,0,0.02)] font-medium text-slate-900 max-w-[200px] truncate" title="${item.combined}">${formatTemplateText(item.combined)}</td>
-            <td class="p-3 sticky-col sticky left-[350px] z-10 border-r border-slate-200 text-center font-mono font-bold ${item.overflow > 0 ? 'text-rose-600' : 'text-slate-300'}">${item.overflow > 0 ? `+${item.overflow}` : '0'}</td>
-            <td class="p-3 sticky-col sticky left-[460px] z-10 border-r border-slate-300 shadow-[3px_0_5px_rgba(0,0,0,0.04)]">${issueText}</td>
+            <td class="p-3 sticky-col sticky left-0 z-10 border-r border-slate-200 bg-white text-center">
+                <input type="checkbox" class="row-checkbox rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer" data-row-index="${item.rowIndex}" ${isChecked ? 'checked' : ''}>
+            </td>
+            <td class="p-3 sticky-col sticky left-[48px] z-10 border-r border-slate-200 shadow-[2px_0_5px_rgba(0,0,0,0.02)]">${statusBadge}</td>
+            <td class="p-3 sticky-col sticky left-[198px] z-10 border-r border-slate-200 shadow-[2px_0_5px_rgba(0,0,0,0.02)] font-medium text-slate-900 max-w-[200px] truncate" title="${item.combined}">${formatTemplateText(item.combined)}</td>
+            <td class="p-3 sticky-col sticky left-[398px] z-10 border-r border-slate-200 text-center font-mono font-bold ${item.overflow > 0 ? 'text-rose-600' : 'text-slate-300'}">${item.overflow > 0 ? `+${item.overflow}` : '0'}</td>
+            <td class="p-3 sticky-col sticky left-[508px] z-10 border-r border-slate-300 shadow-[3px_0_5px_rgba(0,0,0,0.04)]">${issueText}</td>
         `;
 
         originalHeaders.forEach((headerName, curIdx) => {
@@ -358,6 +473,7 @@ function renderFullTable() {
 
     lucide.createIcons();
     initInlineEditingEvents();
+    initCheckboxEvents();
 }
 
 function initInlineEditingEvents() {
@@ -429,16 +545,20 @@ function initInlineEditingEvents() {
 
             updateDashboardStats();
             
-            const combinedCell = tr.querySelector('td:nth-child(2)');
-            const overflowCell = tr.querySelector('td:nth-child(3)');
-            const issueCell = tr.querySelector('td:nth-child(4)');
-            const statusCell = tr.querySelector('td:nth-child(1)');
+            const combinedCell = tr.querySelector('td:nth-child(3)'); // Индекс изменился из-за чекбокса
+            const overflowCell = tr.querySelector('td:nth-child(4)'); // Индекс изменился из-за чекбокса
+            const issueCell = tr.querySelector('td:nth-child(5)');    // Индекс изменился из-за чекбокса
+            const statusCell = tr.querySelector('td:nth-child(2)');   // Индекс изменился из-за чекбокса
 
-            combinedCell.innerHTML = formatTemplateText(dataItem.combined);
-            combinedCell.setAttribute('title', dataItem.combined);
+            if (combinedCell) {
+                combinedCell.innerHTML = formatTemplateText(dataItem.combined);
+                combinedCell.setAttribute('title', dataItem.combined);
+            }
             
-            overflowCell.innerText = dataItem.overflow > 0 ? `+${dataItem.overflow}` : '0';
-            overflowCell.className = `p-3 sticky-col sticky left-[350px] z-10 border-r border-slate-200 text-center font-mono font-bold ${dataItem.overflow > 0 ? 'text-rose-600' : 'text-slate-300'}`;
+            if (overflowCell) {
+                overflowCell.innerText = dataItem.overflow > 0 ? `+${dataItem.overflow}` : '0';
+                overflowCell.className = `p-3 sticky-col sticky left-[398px] z-10 border-r border-slate-200 text-center font-mono font-bold ${dataItem.overflow > 0 ? 'text-rose-600' : 'text-slate-300'}`;
+            }
 
             const lenT1Cell = tr.querySelector('td[data-len-type="t1"]');
             if (lenT1Cell) lenT1Cell.innerText = dataItem.t1.length;
@@ -446,18 +566,20 @@ function initInlineEditingEvents() {
             const lenT2Cell = tr.querySelector('td[data-len-type="text2"]');
             if (lenT2Cell) lenT2Cell.innerText = dataItem.t2.length;
 
-            if (dataItem.statusType === 'lost-utp') {
-                statusCell.innerHTML = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-bold bg-rose-50 text-rose-700 border border-rose-200"><i data-lucide="alert-circle" class="w-3 h-3"></i> Доп. заголовок будет отброшен</span>`;
-                issueCell.innerHTML = `<span class="text-rose-600 font-semibold text-xs">Теряет УТП: ${dataItem.utpReasons.join(', ')}</span>`;
-                tr.className = "bg-rose-50/10 hover:bg-rose-50/20 transition-colors group";
-            } else if (dataItem.statusType === 'lost-safe') {
-                statusCell.innerHTML = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200"><i data-lucide="scissors" class="w-3 h-3"></i> Срез доп. заг-ка</span>`;
-                issueCell.innerHTML = '—';
-                tr.className = "bg-amber-50/5 hover:bg-amber-50/15 transition-colors group";
-            } else {
-                statusCell.innerHTML = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200"><i data-lucide="check" class="w-3 h-3"></i> Перенесется</span>`;
-                issueCell.innerHTML = '—';
-                tr.className = "hover:bg-slate-50/80 transition-colors group";
+            if (statusCell && issueCell) {
+                if (dataItem.statusType === 'lost-utp') {
+                    statusCell.innerHTML = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-bold bg-rose-50 text-rose-700 border border-rose-200"><i data-lucide="alert-circle" class="w-3 h-3"></i> Доп. заголовок будет отброшен</span>`;
+                    issueCell.innerHTML = `<span class="text-rose-600 font-semibold text-xs">Теряет УТП: ${dataItem.utpReasons.join(', ')}</span>`;
+                    tr.className = "bg-rose-50/10 hover:bg-rose-50/20 transition-colors group";
+                } else if (dataItem.statusType === 'lost-safe') {
+                    statusCell.innerHTML = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200"><i data-lucide="scissors" class="w-3 h-3"></i> Срез доп. заг-ка</span>`;
+                    issueCell.innerHTML = '—';
+                    tr.className = "bg-amber-50/5 hover:bg-amber-50/15 transition-colors group";
+                } else {
+                    statusCell.innerHTML = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200"><i data-lucide="check" class="w-3 h-3"></i> Перенесется</span>`;
+                    issueCell.innerHTML = '—';
+                    tr.className = "hover:bg-slate-50/80 transition-colors group";
+                }
             }
 
             cell.innerHTML = formatTemplateText(newText);
@@ -508,7 +630,6 @@ function downloadUpdatedXLSX() {
     const wb = XLSX.utils.book_new();
     const ws = XLSX.utils.aoa_to_sheet(exportRows);
     
-    // Поддержка экспорта в зависимости от формата исходного файла
     if (outputFileName.endsWith('.csv')) {
         XLSX.utils.book_append_sheet(wb, ws, "Кампания");
         XLSX.writeFile(wb, outputFileName, { bookType: 'csv', FS: ';' }); 
