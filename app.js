@@ -136,15 +136,14 @@ function analyzeStructureAndProcess() {
         const row = rawExcelRows[i];
         if (!row || row.length === 0) continue;
 
-        // Сохраняем значения по индексам, чтобы избежать конфликтов дублирующихся имен в rowMap
+        // Сохраняем значения по строго изолированным ключам
         const rowMap = {};
         originalHeaders.forEach((header, colIdx) => {
-            // Создаем уникальный ключ для каждого столбца "ИмяСтолбца_Индекс"
             let uniqueKey = `${header || 'Пусто'}_${colIdx}`;
             rowMap[uniqueKey] = row[colIdx] !== undefined ? String(row[colIdx]).trim() : '';
         });
 
-        // Проверка на заполненность строки
+        // Проверка на заполненность строки по базовому индексу
         let title1 = row[baseT1Idx] !== undefined ? String(row[baseT1Idx]).trim() : '';
         if (title1 === '-' || title1.startsWith('---')) title1 = '';
 
@@ -409,7 +408,7 @@ function renderFullTable() {
         selectAllCheck.checked = allPageRowsChecked;
     }
 
-    // Определяем блок индексов для длин ТГО
+    // Определяем блок индексов для длин базового ТГО
     const tgoLenIndices = (baseTextIdx !== -1) ? [baseTextIdx + 1, baseTextIdx + 2, baseTextIdx + 3] : [];
 
     displayData.forEach(item => {
@@ -455,7 +454,6 @@ function renderFullTable() {
             let displayValue = item.rowMap[uniqueKey] || '';
             let headerLower = headerName.toLowerCase().trim();
             
-            // Жёстко разделяем базовые поля и комбинаторику по индексам
             let isT1 = (curIdx === baseT1Idx);
             let isT2 = (curIdx === baseT2Idx);
             
@@ -486,7 +484,7 @@ function renderFullTable() {
                 } else {
                     // Для комбинаторных длин ищем соответствующую текстовую ячейку слева по имени
                     let targetTextIdx = originalHeaders.findIndex((h, hIdx) => {
-                        if (hIdx <= baseTextIdx) return false; // Пропускаем базовые
+                        if (hIdx <= baseTextIdx) return false;
                         let hLower = h.toLowerCase().trim();
                         return headerLower.includes(hLower) && hIdx !== curIdx;
                     });
@@ -667,7 +665,7 @@ function downloadUpdatedXLSX() {
 
     const exportRows = [];
     
-    // 1. Копируем ВСЕ исходные строки шапки в первозданном виде (включая "Комбинаторика", "Заголовок 1" и т.д.)
+    // 1. Копируем ВСЕ исходные строки шапки в первозданном виде
     for (let i = 0; i <= headerRowGlobalIndex; i++) {
         exportRows.push([...rawExcelRows[i]]);
     }
@@ -695,15 +693,21 @@ function downloadUpdatedXLSX() {
             else if (headerLower.includes('длина') || headerLower.startsWith('дл.')) {
                 let targetTextIdx = originalHeaders.findIndex((h, hIdx) => {
                     if (hIdx <= baseTextIdx) return false;
-                    return h && headerLower.includes(h.toLowerCase().trim()) && hIdx !== curIdx;
+                    let hLower = h.toLowerCase().trim();
+                    return headerLower.includes(hLower) && hIdx !== curIdx;
                 });
+
                 if (targetTextIdx !== -1) {
                     let targetKey = `${originalHeaders[targetTextIdx]}_${targetTextIdx}`;
                     val = (item.rowMap[targetKey] || '').length;
+                } else {
+                    val = 0;
                 }
             }
-            
-            if (val !== '' && !isNaN(val) && (tgoLenIndices.includes(curIdx) || headerLower.includes('длина') || headerLower.startsWith('дл.'))) {
+
+            // Форматируем числовой тип для любых колонок длин
+            let isLengthColumn = tgoLenIndices.includes(curIdx) || headerLower.includes('длина') || headerLower.startsWith('дл.');
+            if (val !== '' && !isNaN(val) && isLengthColumn) {
                 singleRowArray.push(Number(val));
             } else {
                 singleRowArray.push(val);
@@ -715,21 +719,14 @@ function downloadUpdatedXLSX() {
     const wb = XLSX.utils.book_new();
     const ws = XLSX.utils.aoa_to_sheet(exportRows);
     
-    // 3. Переносим карту оригинальных merges (объединений ячеек), чтобы восстановить двухэтажную шапку "Комбинаторика"
-    if (currentWorkbook && !outputFileName.endsWith('.csv')) {
-        try {
-            const activeSheetName = currentWorkbook.SheetNames[0];
-            if (currentWorkbook.Sheets[activeSheetName]['!merges']) {
-                ws['!merges'] = currentWorkbook.Sheets[activeSheetName]['!merges'];
-            }
-        } catch(e) {
-            console.log("Оригинальные объединения ячеек не найдены или произошла ошибка чтения.");
-        }
+    // Переносим объединения ячеек (merges) из исходного файла, если они были
+    if (currentWorkbook && currentWorkbook.Sheets[currentWorkbook.SheetNames[0]]['!merges']) {
+        ws['!merges'] = currentWorkbook.Sheets[currentWorkbook.SheetNames[0]]['!merges'];
     }
-    
+
     if (outputFileName.endsWith('.csv')) {
         XLSX.utils.book_append_sheet(wb, ws, "Кампания");
-        XLSX.writeFile(wb, outputFileName, { bookType: 'csv', FS: ';' }); 
+        XLSX.writeFile(wb, outputFileName, { bookType: 'csv', FS: ';' });
     } else {
         XLSX.utils.book_append_sheet(wb, ws, "Кампания");
         XLSX.writeFile(wb, outputFileName);
