@@ -230,7 +230,7 @@ function buildTableHeader() {
     let html = `
         <th class="py-4 px-4 bg-slate-100 text-slate-700 sticky left-0 z-40 border-r border-slate-200 w-12 text-center">
             <input type="checkbox" id="selectAllCheckbox" class="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer">
-        >
+        </th>
         <th id="sortStatusBtn" class="py-4 px-4 bg-slate-100 text-slate-700 sticky left-[48px] z-30 border-r border-slate-200 shadow-[2px_0_5px_rgba(0,0,0,0.03)] min-w-[150px] cursor-pointer hover:bg-slate-200 transition-colors select-none">
             <div class="flex items-center gap-1.5">
                 Статус переноса <span id="sortIndicator" class="text-indigo-600 font-mono text-xs">↕</span>
@@ -360,47 +360,6 @@ function formatTemplateText(text) {
     return text.replace(/#([^#]+)#/g, '<span class="yandex-template">#$1#</span>');
 }
 
-// Функция для сопоставления текстового столбца и столбца его расчетной длины
-function getLengthColumnIndex(headerName) {
-    if (!headerName) return -1;
-    
-    // Для ТГО объявлений (Заголовок 1, Заголовок 2, Текст)
-    if (headerName === t1HeaderName) {
-        const t1Idx = originalHeaders.indexOf(t1HeaderName);
-        const textIdx = originalHeaders.indexOf(textHeaderName);
-        return (textIdx !== -1) ? textIdx + 1 : -1;
-    }
-    if (headerName === t2HeaderName) {
-        const t1Idx = originalHeaders.indexOf(t1HeaderName);
-        const textIdx = originalHeaders.indexOf(textHeaderName);
-        return (textIdx !== -1) ? textIdx + 2 : -1;
-    }
-    if (headerName === textHeaderName) {
-        const textIdx = originalHeaders.indexOf(textHeaderName);
-        return (textIdx !== -1) ? textIdx + 3 : -1;
-    }
-
-    // Для комбинаторных объявлений (Заголовок 3..7, Текст 1..3)
-    // Ищем точное совпадение: например, "Длина Заголовка 3" или "Длина Текста 1"
-    const targetLengthHeader = `Длина ${headerName.toLowerCase()}`;
-    const foundIdx = originalHeaders.findIndex(h => h.toLowerCase().trim() === targetLengthHeader);
-    if (foundIdx !== -1) return foundIdx;
-
-    // Альтернативный поиск по вхождению (на случай сокращений в шаблонах экспорта)
-    const numMatch = headerName.match(/\d+/);
-    if (numMatch) {
-        const num = numMatch[0];
-        if (headerName.toLowerCase().includes('заголовок')) {
-            return originalHeaders.findIndex(h => h.toLowerCase().includes('длина') && h.toLowerCase().includes('заголовок') && h.includes(num));
-        }
-        if (headerName.toLowerCase().includes('текст')) {
-            return originalHeaders.findIndex(h => h.toLowerCase().includes('длина') && h.toLowerCase().includes('текст') && h.includes(num));
-        }
-    }
-
-    return -1;
-}
-
 function renderFullTable() {
     tableBody.innerHTML = '';
 
@@ -439,7 +398,6 @@ function renderFullTable() {
         selectAllCheck.checked = allPageRowsChecked;
     }
 
-    // Собираем все индексы колонок, которые отвечают за длины
     const textColIdx = originalHeaders.indexOf(textHeaderName);
     const tgoLenIndices = (textColIdx !== -1) ? [textColIdx + 1, textColIdx + 2, textColIdx + 3] : [];
 
@@ -483,14 +441,17 @@ function renderFullTable() {
 
         originalHeaders.forEach((headerName, curIdx) => {
             let displayValue = item.rowMap[headerName] || '';
-            let headerLower = headerName.toLowerCase();
+            let headerLower = headerName.toLowerCase().trim();
             
             let isT1 = (headerName === t1HeaderName);
             let isT2 = (headerName === t2HeaderName);
             
-            // Проверяем, является ли текущее поле комбинаторным текстовым полем или его длиной
-            let isCombText = /заголовок\s*[3-7]|текст\s*[1-3]/i.test(headerName) && !headerLower.includes('длина');
-            let isLengthCol = tgoLenIndices.includes(curIdx) || headerLower.includes('длина') || headerLower.startsWith('дл. ');
+            // ИСПРАВЛЕННОЕ УСЛОВИЕ: Любые столбцы со словами Заголовок/Текст, кроме базовых ТГО и полей длин
+            let isCombText = (headerLower.includes('заголовок') || headerLower.includes('текст')) && 
+                             !headerLower.includes('длина') && !headerLower.startsWith('дл.') &&
+                             headerName !== t1HeaderName && headerName !== t2HeaderName && headerName !== textHeaderName;
+
+            let isLengthCol = tgoLenIndices.includes(curIdx) || headerLower.includes('длина') || headerLower.startsWith('дл.');
 
             let cellStyle = "p-3 text-slate-600 border-r border-slate-100 max-w-[250px] truncate";
             let editableAttr = "";
@@ -499,7 +460,6 @@ function renderFullTable() {
             if (isLengthCol) {
                 cellStyle += " font-mono font-semibold text-center bg-slate-50/50 text-indigo-600";
                 
-                // Подставляем актуальные расчетные длины для ТГО из стейта
                 if (curIdx === tgoLenIndices[0]) {
                     displayValue = item.t1.length;
                     extraDataAttr = `data-len-type="t1"`;
@@ -510,17 +470,15 @@ function renderFullTable() {
                     displayValue = (item.rowMap[textHeaderName] || '').length;
                     extraDataAttr = `data-len-type="text"`;
                 } else {
-                    // Для комбинаторных длин выводим длину связанного текстового поля
-                    // Ищем имя оригинального текстового поля, отрезав слово "Длина "
-                    let textHeaderKey = originalHeaders.find(h => `длина ${h.toLowerCase()}` === headerLower || headerLower.includes(h.toLowerCase()));
+                    // Прямая связка комбинаторной ячейки длины с её текстом
+                    let textHeaderKey = originalHeaders.find(h => headerLower.includes(h.toLowerCase().trim()) && h !== headerName);
                     if (!textHeaderKey) {
-                        // Фолбэк-определение по цифре
                         let m = headerName.match(/\d+/);
                         let type = headerLower.includes('заг') ? 'Заголовок' : 'Текст';
                         textHeaderKey = m ? `${type} ${m[0]}` : '';
                     }
                     displayValue = (item.rowMap[textHeaderKey] || '').length;
-                    extraDataAttr = `data-len-type="comb-len" data-source-field="${textHeaderKey || ''}"`;
+                    extraDataAttr = `data-len-type="comb-len" data-source-field="${textHeaderKey}"`;
                 }
             }
             
@@ -531,7 +489,6 @@ function renderFullTable() {
                 cellStyle += " bg-amber-50/30 text-slate-900 font-medium editable-cell cursor-text";
                 editableAttr = `contenteditable="true" data-type="t2" data-field-name="${headerName}"`;
             } else if (isCombText) {
-                // Разрешаем редактирование Заголовков 3-7 и Текстов 1-3 прямо в ячейке!
                 cellStyle += " bg-slate-50/60 text-slate-900 font-medium editable-cell cursor-text border-dashed border-b border-slate-300";
                 editableAttr = `contenteditable="true" data-type="comb-text" data-field-name="${headerName}"`;
             }
@@ -566,7 +523,6 @@ function initInlineEditingEvents() {
             liveCounter.style.top = `${rect.top + window.scrollY - 28}px`;
             liveCounter.innerText = `Длина: ${len} симв.`;
             
-            // Индикация превышения лимита заголовков (56 символов)
             if ((editType === 't1' || fieldName.toLowerCase().includes('заголовок')) && len > 56) {
                 liveCounter.className = "fixed z-50 bg-rose-600 text-white px-2.5 py-1 text-xs font-mono rounded-md shadow-lg pointer-events-none font-bold";
             } else {
@@ -575,7 +531,6 @@ function initInlineEditingEvents() {
 
             const tr = cell.closest('tr');
             
-            // Динамически ищем и обновляем нужную ячейку длины на экране
             if (editType === 't1') {
                 const lenT1Cell = tr.querySelector('td[data-len-type="t1"]');
                 if (lenT1Cell) lenT1Cell.innerText = len;
@@ -583,6 +538,7 @@ function initInlineEditingEvents() {
                 const lenT2Cell = tr.querySelector('td[data-len-type="text2"]');
                 if (lenT2Cell) lenT2Cell.innerText = len;
             } else if (editType === 'comb-text') {
+                // ИСПРАВЛЕННЫЙ ПОИСК: Находим ячейку длины на экране по дата-атрибуту связанного поля
                 const lenCombCell = tr.querySelector(`td[data-source-field="${fieldName}"]`);
                 if (lenCombCell) lenCombCell.innerText = len;
             }
@@ -619,7 +575,6 @@ function initInlineEditingEvents() {
             const dataItem = processedDataset.find(item => item.rowIndex === rowIndex);
             if (!dataItem) return;
 
-            // Записываем измененное значение обратно в модель данных
             if (editType === 't1') {
                 dataItem.t1 = newText;
                 dataItem.rowMap[t1HeaderName] = newText;
@@ -630,13 +585,11 @@ function initInlineEditingEvents() {
                 dataItem.rowMap[fieldName] = newText;
             }
 
-            // Пересчитываем базовые метрики ТГО
             const updatedMetrics = computeRowMetrics(rowIndex, dataItem.t1, dataItem.t2, dataItem.rowMap);
             Object.assign(dataItem, updatedMetrics);
 
             updateDashboardStats();
             
-            // Локальное обновление статусных колонок ТГО на лету
             const combinedCell = tr.querySelector('td:nth-child(3)'); 
             const overflowCell = tr.querySelector('td:nth-child(4)'); 
             const issueCell = tr.querySelector('td:nth-child(5)');    
@@ -707,16 +660,14 @@ function downloadUpdatedXLSX() {
         const singleRowArray = [];
         originalHeaders.forEach((headerName, curIdx) => {
             let val = item.rowMap[headerName] || '';
-            let headerLower = headerName.toLowerCase();
+            let headerLower = headerName.toLowerCase().trim();
             
-            // Динамический пересчет длин ячеек при сохранении
             if (tgoLenIndices.includes(curIdx)) {
                 if (curIdx === tgoLenIndices[0]) val = item.t1.length;
                 else if (curIdx === tgoLenIndices[1]) val = item.t2.length;
                 else if (curIdx === tgoLenIndices[2]) val = (item.rowMap[textHeaderName] || '').length;
-            } else if (headerLower.includes('длина') || headerLower.startsWith('дл. ')) {
-                // Вычисляем длину связанного комбинаторного текстового поля
-                let textHeaderKey = originalHeaders.find(h => `длина ${h.toLowerCase()}` === headerLower || headerLower.includes(h.toLowerCase()));
+            } else if (headerLower.includes('длина') || headerLower.startsWith('дл.')) {
+                let textHeaderKey = originalHeaders.find(h => headerLower.includes(h.toLowerCase().trim()) && h !== headerName);
                 if (!textHeaderKey) {
                     let m = headerName.match(/\d+/);
                     let type = headerLower.includes('заг') ? 'Заголовок' : 'Текст';
@@ -727,8 +678,7 @@ function downloadUpdatedXLSX() {
                 }
             }
             
-            // Сохраняем числа как числовые типы данных, чтобы Excel не ругался
-            if (val !== '' && !isNaN(val) && (tgoLenIndices.includes(curIdx) || headerLower.includes('длина') || headerLower.startsWith('дл. '))) {
+            if (val !== '' && !isNaN(val) && (tgoLenIndices.includes(curIdx) || headerLower.includes('длина') || headerLower.startsWith('дл.'))) {
                 singleRowArray.push(Number(val));
             } else {
                 singleRowArray.push(val);
