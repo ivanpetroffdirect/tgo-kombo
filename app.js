@@ -8,6 +8,7 @@ let searchQuery = '';
 let sortDirection = 'none'; 
 let outputFileName = 'compiled_campaign.xlsx';
 let selectedRowIndices = []; // Массив для хранения rowIndex выбранных объявлений
+let currentWorkbook = null;  // Ссылка на текущую книгу для сохранения структуры merges
 
 // Хранилище базовых названий и точных индексов в шапке
 let t1HeaderName = 'Заголовок 1';
@@ -64,18 +65,17 @@ function handleFileSelect(event) {
 
     const reader = new FileReader();
     reader.onload = function(e) {
-        let workbook;
         if (file.name.endsWith('.csv')) {
             const text = new TextDecoder('windows-1251').decode(e.target.result);
             const firstLine = text.split('\n')[0];
             const fs = (firstLine.split(';').length > firstLine.split(',').length) ? ';' : ',';
-            workbook = XLSX.read(text, { type: 'string', FS: fs });
+            currentWorkbook = XLSX.read(text, { type: 'string', FS: fs });
         } else {
             const data = new Uint8Array(e.target.result);
-            workbook = XLSX.read(data, { type: 'array' });
+            currentWorkbook = XLSX.read(data, { type: 'array' });
         }
 
-        const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+        const worksheet = currentWorkbook.Sheets[currentWorkbook.SheetNames[0]];
         rawExcelRows = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' });
         
         if (rawExcelRows.length === 0) {
@@ -485,7 +485,6 @@ function renderFullTable() {
                     extraDataAttr = `data-len-type="text"`;
                 } else {
                     // Для комбинаторных длин ищем соответствующую текстовую ячейку слева по имени
-                    // (Например, у нас колонка "Длина заголовка 1", значит ищем "Заголовок 1", который идёт в блоке комбинаторики)
                     let targetTextIdx = originalHeaders.findIndex((h, hIdx) => {
                         if (hIdx <= baseTextIdx) return false; // Пропускаем базовые
                         let hLower = h.toLowerCase().trim();
@@ -558,7 +557,6 @@ function initInlineEditingEvents() {
                 const lenT2Cell = tr.querySelector('td[data-len-type="text2"]');
                 if (lenT2Cell) lenT2Cell.innerText = len;
             } else if (editType === 'comb-text') {
-                // Связываем изменение комбинаторного текста с его ячейкой длины
                 const lenCombCell = tr.querySelector(`td[data-source-field="${fieldKey}"]`);
                 if (lenCombCell) lenCombCell.innerText = len;
             }
@@ -669,20 +667,22 @@ function downloadUpdatedXLSX() {
 
     const exportRows = [];
     
+    // 1. Копируем ВСЕ исходные строки шапки в первозданном виде (включая "Комбинаторика", "Заголовок 1" и т.д.)
     for (let i = 0; i <= headerRowGlobalIndex; i++) {
-        exportRows.push(rawExcelRows[i]);
+        exportRows.push([...rawExcelRows[i]]);
     }
 
     const tgoLenIndices = (baseTextIdx !== -1) ? [baseTextIdx + 1, baseTextIdx + 2, baseTextIdx + 3] : [];
 
+    // 2. Добавляем обновленные строки данных
     processedDataset.forEach(item => {
         const singleRowArray = [];
         originalHeaders.forEach((headerName, curIdx) => {
             let uniqueKey = `${headerName || 'Пусто'}_${curIdx}`;
-            let val = item.rowMap[uniqueKey] || '';
-            let headerLower = headerName.toLowerCase().trim();
+            let val = item.rowMap[uniqueKey] !== undefined ? item.rowMap[uniqueKey] : '';
+            let headerLower = headerName ? headerName.toLowerCase().trim() : '';
             
-            // Вычисляем длины на лету при экспорте
+            // Вычисляем базовые длины
             if (tgoLenIndices.includes(curIdx)) {
                 if (curIdx === tgoLenIndices[0]) val = item.t1.length;
                 else if (curIdx === tgoLenIndices[1]) val = item.t2.length;
@@ -690,10 +690,12 @@ function downloadUpdatedXLSX() {
                     let baseTextKey = `${textHeaderName}_${baseTextIdx}`;
                     val = (item.rowMap[baseTextKey] || '').length;
                 }
-            } else if (headerLower.includes('длина') || headerLower.startsWith('дл.')) {
+            } 
+            // Вычисляем комбинаторные длины
+            else if (headerLower.includes('длина') || headerLower.startsWith('дл.')) {
                 let targetTextIdx = originalHeaders.findIndex((h, hIdx) => {
                     if (hIdx <= baseTextIdx) return false;
-                    return headerLower.includes(h.toLowerCase().trim()) && hIdx !== curIdx;
+                    return h && headerLower.includes(h.toLowerCase().trim()) && hIdx !== curIdx;
                 });
                 if (targetTextIdx !== -1) {
                     let targetKey = `${originalHeaders[targetTextIdx]}_${targetTextIdx}`;
@@ -712,6 +714,18 @@ function downloadUpdatedXLSX() {
 
     const wb = XLSX.utils.book_new();
     const ws = XLSX.utils.aoa_to_sheet(exportRows);
+    
+    // 3. Переносим карту оригинальных merges (объединений ячеек), чтобы восстановить двухэтажную шапку "Комбинаторика"
+    if (currentWorkbook && !outputFileName.endsWith('.csv')) {
+        try {
+            const activeSheetName = currentWorkbook.SheetNames[0];
+            if (currentWorkbook.Sheets[activeSheetName]['!merges']) {
+                ws['!merges'] = currentWorkbook.Sheets[activeSheetName]['!merges'];
+            }
+        } catch(e) {
+            console.log("Оригинальные объединения ячеек не найдены или произошла ошибка чтения.");
+        }
+    }
     
     if (outputFileName.endsWith('.csv')) {
         XLSX.utils.book_append_sheet(wb, ws, "Кампания");
