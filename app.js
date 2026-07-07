@@ -136,8 +136,13 @@ function analyzeStructureAndProcess() {
             rowMap[header] = row[colIdx] !== undefined ? String(row[colIdx]).trim() : '';
         });
 
-        const title1 = rowMap[t1HeaderName] || '';
-        if (!title1 || title1 === '-' || title1.startsWith('---')) continue; 
+        // ИСПРАВЛЕНИЕ: Больше не пропускаем строки с пустым Заголовком 1, чтобы выводить все типы объявлений.
+        // Пропускаем только технические/пустые строки, где нет даже ID объявления или названия группы.
+        const hasIdOrGroup = originalHeaders.some(h => (h.includes('ID') || h.includes('Название группы') || h.includes('Тип объявления')) && rowMap[h]);
+        if (!hasIdOrGroup && (!rowMap[t1HeaderName] || rowMap[t1HeaderName] === '-')) continue;
+
+        let title1 = rowMap[t1HeaderName] || '';
+        if (title1 === '-' || title1.startsWith('---')) title1 = '';
 
         const title2 = rowMap[t2HeaderName] || '';
         
@@ -151,15 +156,16 @@ function analyzeStructureAndProcess() {
 }
 
 function computeRowMetrics(rowIndex, t1, t2, rowMap) {
+    const cleanTitle1 = (t1 === '-' || t1 === '0') ? '' : t1;
     const cleanTitle2 = (t2 === '-' || t2 === '0') ? '' : t2;
 
-    let combinedTitle = t1;
+    let combinedTitle = cleanTitle1;
     let isMerged = false;
-    let totalLength = t1.length;
+    let totalLength = cleanTitle1.length;
     let overflow = 0;
 
-    if (cleanTitle2) {
-        const potential = t1 + ". " + cleanTitle2;
+    if (cleanTitle1 && cleanTitle2) {
+        const potential = cleanTitle1 + ". " + cleanTitle2;
         if (potential.length <= 56) {
             combinedTitle = potential;
             isMerged = true;
@@ -167,6 +173,11 @@ function computeRowMetrics(rowIndex, t1, t2, rowMap) {
         } else {
             overflow = potential.length - 56;
         }
+    } else if (!cleanTitle1 && cleanTitle2) {
+        // Если первого заголовка нет, а второй есть (редкий случай для специфических объявлений)
+        combinedTitle = cleanTitle2;
+        isMerged = true;
+        totalLength = cleanTitle2.length;
     } else {
         isMerged = true;
     }
@@ -187,7 +198,7 @@ function computeRowMetrics(rowIndex, t1, t2, rowMap) {
 
     return {
         rowIndex: rowIndex,
-        t1: t1,
+        t1: cleanTitle1,
         t2: cleanTitle2,
         combined: combinedTitle,
         isMerged: isMerged,
@@ -415,7 +426,6 @@ function renderFullTable() {
             statusBadge = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200"><i data-lucide="scissors" class="w-3 h-3"></i> Срез доп. заг-ка</span>`;
             rowBgClass = 'bg-amber-50/5 hover:bg-amber-50/15';
         } else {
-            // ИСПРАВЛЕНИЕ: Проверяем, есть ли текст во 2-м заголовке
             if (!item.t2 || item.t2.trim() === '') {
                 statusBadge = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200"><i data-lucide="check" class="w-3 h-3"></i> Нет второго заголовка</span>`;
             } else {
@@ -582,7 +592,6 @@ function initInlineEditingEvents() {
                     issueCell.innerHTML = '—';
                     tr.className = "bg-amber-50/5 hover:bg-amber-50/15 transition-colors group";
                 } else {
-                    // ИСПРАВЛЕНИЕ: Также обновляем текст при инлайн-редактировании на лету
                     if (!dataItem.t2 || dataItem.t2.trim() === '') {
                         statusCell.innerHTML = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200"><i data-lucide="check" class="w-3 h-3"></i> Нет второго заголовка</span>`;
                     } else {
