@@ -216,11 +216,9 @@ function updateDashboardStats() {
     const success = processedDataset.filter(d => d.statusType === 'success').length;
     const cut = processedDataset.filter(d => d.statusType === 'lost-safe').length;
     const loss = processedDataset.filter(d => d.statusType === 'lost-utp').length;
-    const pct = total > 0 ? Math.round((success / total) * 100) : 0;
 
     document.getElementById('statTotal').innerText = total;
     document.getElementById('statSuccess').innerText = success;
-    //document.getElementById('statSuccessPct').innerText = `${pct}% от всех объявлений`;
     document.getElementById('statCut').innerText = cut;
     document.getElementById('statLoss').innerText = loss;
 }
@@ -365,7 +363,11 @@ function renderFullTable() {
     let displayData = [...processedDataset];
     
     if (currentFilter !== 'all') {
-        displayData = displayData.filter(item => item.statusType === currentFilter);
+        if (currentFilter === 'has-t2') {
+            displayData = displayData.filter(item => item.t2 && item.t2 !== '');
+        } else {
+            displayData = displayData.filter(item => item.statusType === currentFilter);
+        }
     }
 
     if (searchQuery) {
@@ -386,7 +388,6 @@ function renderFullTable() {
         return;
     }
 
-    // Синхронизируем главный чекбокс шапки: если отфильтровали, и ничего не выбрано — снимаем галочку
     const selectAllCheck = document.getElementById('selectAllCheckbox');
     if (selectAllCheck) {
         const pageRowIds = displayData.map(d => d.rowIndex);
@@ -414,7 +415,12 @@ function renderFullTable() {
             statusBadge = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200"><i data-lucide="scissors" class="w-3 h-3"></i> Срез доп. заг-ка</span>`;
             rowBgClass = 'bg-amber-50/5 hover:bg-amber-50/15';
         } else {
-            statusBadge = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200"><i data-lucide="check" class="w-3 h-3"></i> Перенесется</span>`;
+            // ИСПРАВЛЕНИЕ: Проверяем, есть ли текст во 2-м заголовке
+            if (!item.t2 || item.t2.trim() === '') {
+                statusBadge = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200"><i data-lucide="check" class="w-3 h-3"></i> Нет второго заголовка</span>`;
+            } else {
+                statusBadge = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200"><i data-lucide="check" class="w-3 h-3"></i> Перенесется</span>`;
+            }
         }
 
         if (rowBgClass) tr.className = rowBgClass;
@@ -545,10 +551,10 @@ function initInlineEditingEvents() {
 
             updateDashboardStats();
             
-            const combinedCell = tr.querySelector('td:nth-child(3)'); // Индекс изменился из-за чекбокса
-            const overflowCell = tr.querySelector('td:nth-child(4)'); // Индекс изменился из-за чекбокса
-            const issueCell = tr.querySelector('td:nth-child(5)');    // Индекс изменился из-за чекбокса
-            const statusCell = tr.querySelector('td:nth-child(2)');   // Индекс изменился из-за чекбокса
+            const combinedCell = tr.querySelector('td:nth-child(3)'); 
+            const overflowCell = tr.querySelector('td:nth-child(4)'); 
+            const issueCell = tr.querySelector('td:nth-child(5)');    
+            const statusCell = tr.querySelector('td:nth-child(2)');   
 
             if (combinedCell) {
                 combinedCell.innerHTML = formatTemplateText(dataItem.combined);
@@ -576,7 +582,12 @@ function initInlineEditingEvents() {
                     issueCell.innerHTML = '—';
                     tr.className = "bg-amber-50/5 hover:bg-amber-50/15 transition-colors group";
                 } else {
-                    statusCell.innerHTML = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200"><i data-lucide="check" class="w-3 h-3"></i> Перенесется</span>`;
+                    // ИСПРАВЛЕНИЕ: Также обновляем текст при инлайн-редактировании на лету
+                    if (!dataItem.t2 || dataItem.t2.trim() === '') {
+                        statusCell.innerHTML = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200"><i data-lucide="check" class="w-3 h-3"></i> Нет второго заголовка</span>`;
+                    } else {
+                        statusCell.innerHTML = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200"><i data-lucide="check" class="w-3 h-3"></i> Перенесется</span>`;
+                    }
                     issueCell.innerHTML = '—';
                     tr.className = "hover:bg-slate-50/80 transition-colors group";
                 }
