@@ -131,8 +131,8 @@ function analyzeStructureAndProcess() {
     let startDataRow = headerRowIndex + 1;
     while (startDataRow < rawExcelRows.length && rawExcelRows[startDataRow]) {
         const checkRow = rawExcelRows[startDataRow].map(c => String(c || '').toLowerCase().trim());
-        // Пропускаем служебные строки ограничений Директа (например, "56", "35", "81")
-        if (checkRow.includes('заголовок 1') || checkRow.includes('текст') || checkRow.some(c => c === '55' || c === '56' || c === '35' || c === '81')) {
+        // Пропускаем служебные строки ограничений Директа (например, "55", "56", "35", "81", "264")
+        if (checkRow.includes('заголовок 1') || checkRow.includes('текст') || checkRow.some(c => c === '55' || c === '56' || c === '35' || c === '81' || c === '264')) {
             startDataRow++;
         } else {
             break;
@@ -395,10 +395,10 @@ function renderFullTable() {
         selectAllCheck.checked = allPageRowsChecked;
     }
 
-    // ОПРЕДЕЛЕНИЕ ИНДЕКСОВ ДЛИН ПО ТОЧНОМУ НАЗВАНИЮ (строчные буквы из Коммандера)
-    let lenT1Idx = originalHeaders.findIndex((h, idx) => h.trim() === 'заголовок 1' && idx > baseT1Idx);
-    let lenT2Idx = originalHeaders.findIndex((h, idx) => h.trim() === 'заголовок 2' && idx > baseT2Idx);
-    let lenTextIdx = originalHeaders.findIndex((h, idx) => h.trim() === 'текст' && idx > baseTextIdx);
+    // НАДЕЖНАЯ СВЯЗКА: жесткое смещение (+1) от базовых полей Коммандера
+    let lenT1Idx = baseT1Idx !== -1 ? baseT1Idx + 1 : -1;
+    let lenT2Idx = baseT2Idx !== -1 ? baseT2Idx + 1 : -1;
+    let lenTextIdx = baseTextIdx !== -1 ? baseTextIdx + 1 : -1;
     const tgoLenIndices = [lenT1Idx, lenT2Idx, lenTextIdx].filter(idx => idx !== -1);
 
     displayData.forEach(item => {
@@ -421,6 +421,7 @@ function renderFullTable() {
             } else {
                 statusBadge = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200"><i data-lucide="check" class="w-3 h-3"></i> Перенесется</span>`;
             }
+            issueText = '—';
         }
         if (rowBgClass) tr.className = rowBgClass;
         const isChecked = selectedRowIndices.includes(item.rowIndex);
@@ -436,7 +437,7 @@ function renderFullTable() {
         originalHeaders.forEach((headerName, curIdx) => {
             let uniqueKey = `${headerName || 'Пусто'}_${curIdx}`;
             let displayValue = item.rowMap[uniqueKey] || '';
-            let headerLower = headerName.toLowerCase().trim();
+            let headerLower = headerName ? headerName.toLowerCase().trim() : '';
 
             let isT1 = (curIdx === baseT1Idx);
             let isT2 = (curIdx === baseT2Idx);
@@ -631,10 +632,10 @@ function downloadUpdatedXLSX() {
         exportRows.push([...rawExcelRows[i]]);
     }
 
-    // Определение индексов базовых длин по строчному названию
-    let lenT1Idx = originalHeaders.findIndex((h, idx) => h.trim() === 'заголовок 1' && idx > baseT1Idx);
-    let lenT2Idx = originalHeaders.findIndex((h, idx) => h.trim() === 'заголовок 2' && idx > baseT2Idx);
-    let lenTextIdx = originalHeaders.findIndex((h, idx) => h.trim() === 'текст' && idx > baseTextIdx);
+    // Жесткое относительное определение индексов длин
+    let lenT1Idx = baseT1Idx !== -1 ? baseT1Idx + 1 : -1;
+    let lenT2Idx = baseT2Idx !== -1 ? baseT2Idx + 1 : -1;
+    let lenTextIdx = baseTextIdx !== -1 ? baseTextIdx + 1 : -1;
     const tgoLenIndices = [lenT1Idx, lenT2Idx, lenTextIdx].filter(idx => idx !== -1);
 
     // 2. Добавляем обновленные строки данных
